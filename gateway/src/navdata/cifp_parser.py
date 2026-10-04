@@ -2,7 +2,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Optional, Union
 
-from navdata.models import Runway, RunwayList, SID, SidList
+from .models import Runway, RunwayList, SID, SidList
 
 
 def parse_arinc_coords(lat_s: str, lon_s: str) -> tuple[float, float]:

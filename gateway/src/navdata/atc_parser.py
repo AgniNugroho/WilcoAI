@@ -2,7 +2,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Optional, Union, Any
 
-from navdata.models import Facility, FacilityDict, AirportInfo
+from .models import Facility, FacilityDict, AirportInfo
 
 # Standard / reference ATC facilities for known regional airports
 DEFAULT_AIRPORT_FACILITIES: dict[str, dict[str, int]] = {

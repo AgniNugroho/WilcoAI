@@ -2,7 +2,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Optional, Union
 
-from navdata.models import (
+from .models import (
     AirportInfo,
     Facility,
     FacilityDict,
@@ -11,14 +11,14 @@ from navdata.models import (
     SID,
     SidList,
 )
-from navdata.atc_parser import (
+from .atc_parser import (
     DEFAULT_AIRPORT_FACILITIES,
     DEFAULT_AIRPORT_NAMES,
     get_facility_by_freq,
     parse_atc_facilities,
     parse_freq_to_hz,
 )
-from navdata.cifp_parser import (
+from .cifp_parser import (
     parse_arinc_coords,
     parse_cifp,
     parse_transition_altitude,

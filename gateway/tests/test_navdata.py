@@ -125,3 +125,76 @@ def test_facility_dict_case_insensitivity():
 def test_load_airport_not_found():
     with pytest.raises(FileNotFoundError):
         load_airport(CUSTOM_DATA_PATH, "ZZZZ")
+
+
+def test_airport_info_contains_objects():
+    airport = load_airport(CUSTOM_DATA_PATH, "WAHI")
+    rw11 = airport.runways["11"]
+    sid_ca2l = airport.sids["CA2L"]
+    twr_facility = get_facility_by_freq(airport, 118200000)
+
+    # Object containment
+    assert rw11 in airport
+    assert sid_ca2l in airport
+    assert twr_facility in airport
+
+    # Foreign objects should not be contained
+    foreign_rwy = Runway(ident="99")
+    foreign_sid = SID(name="ZZZZ1A")
+    foreign_fac = Facility(name="Unknown Tower", role="TWR", frequency_hz=139000000)
+    assert foreign_rwy not in airport
+    assert foreign_sid not in airport
+    assert foreign_fac not in airport
+
+
+def test_facility_dict_mutation_and_alias_sync():
+    airport = load_airport(CUSTOM_DATA_PATH, "WAHI")
+
+    # Mutation with alias name 'Tower' should update 'TWR', 'twr', etc.
+    airport.facilities["Tower"] = 119500000
+    assert airport.facilities["TWR"] == 119500000
+    assert airport.facilities["twr"] == 119500000
+    assert airport.facilities["Tower"] == 119500000
+
+    # Mutation with code 'GND' should update 'Ground', 'gnd', etc.
+    airport.facilities["GND"] = 121800000
+    assert airport.facilities["Ground"] == 121800000
+    assert airport.facilities["gnd"] == 121800000
+
+
+def test_runway_and_sid_hashability():
+    airport = load_airport(CUSTOM_DATA_PATH, "WAHI")
+    rw11 = airport.runways["11"]
+    rw29 = airport.runways["29"]
+    sid_ca2l = airport.sids["CA2L"]
+    sid_clp2f = airport.sids["CLP2F"]
+
+    # Must be hashable in sets
+    runway_set = {rw11, rw29}
+    assert len(runway_set) == 2
+    assert rw11 in runway_set
+
+    sid_set = {sid_ca2l, sid_clp2f}
+    assert len(sid_set) == 2
+    assert sid_ca2l in sid_set
+
+    # Must be usable as dict keys
+    data = {rw11: "Runway 11", sid_ca2l: "Departure CA2L"}
+    assert data[rw11] == "Runway 11"
+    assert data[sid_ca2l] == "Departure CA2L"
+
+
+def test_list_get_with_index_out_of_bounds():
+    airport = load_airport(CUSTOM_DATA_PATH, "WAHI")
+
+    # Integer index out of bounds should return default without raising IndexError
+    assert airport.runways.get(999) is None
+    assert airport.runways.get(999, default="NOT_FOUND") == "NOT_FOUND"
+
+    assert airport.sids.get(999) is None
+    assert airport.sids.get(999, default="NOT_FOUND") == "NOT_FOUND"
+
+    # Valid integer index should return the item
+    assert airport.runways.get(0) is not None
+    assert airport.sids.get(0) is not None
+

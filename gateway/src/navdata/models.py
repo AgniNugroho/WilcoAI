@@ -16,6 +16,8 @@ class RunwayList(list):
         return super().__getitem__(key)
 
     def __contains__(self, item: Any) -> bool:
+        if isinstance(item, Runway):
+            return any(r == item for r in self)
         if isinstance(item, str):
             clean = item.upper().replace("RWY", "").replace("RW", "")
             return any(
@@ -24,10 +26,10 @@ class RunwayList(list):
             )
         return super().__contains__(item)
 
-    def get(self, key: str, default: Optional[Runway] = None) -> Optional[Runway]:
+    def get(self, key: Union[int, str], default: Optional[Runway] = None) -> Optional[Runway]:
         try:
             return self[key]
-        except KeyError:
+        except (KeyError, IndexError):
             return default
 
 
@@ -58,6 +60,9 @@ class Runway:
             return self.ident == other.ident
         return super().__eq__(other)
 
+    def __hash__(self) -> int:
+        return hash(self.ident)
+
 
 @dataclass
 class SID:
@@ -79,6 +84,9 @@ class SID:
             return self.name == other.name
         return super().__eq__(other)
 
+    def __hash__(self) -> int:
+        return hash(self.name)
+
 
 class SidList(list):
     """List of SID instances that supports dict-like and string-containment operations."""
@@ -93,15 +101,17 @@ class SidList(list):
         return super().__getitem__(key)
 
     def __contains__(self, item: Any) -> bool:
+        if isinstance(item, SID):
+            return any(s == item for s in self)
         if isinstance(item, str):
             item_upper = item.upper()
             return any(s.name.upper() == item_upper for s in self)
         return super().__contains__(item)
 
-    def get(self, key: str, default: Optional[SID] = None) -> Optional[SID]:
+    def get(self, key: Union[int, str], default: Optional[SID] = None) -> Optional[SID]:
         try:
             return self[key]
-        except KeyError:
+        except (KeyError, IndexError):
             return default
 
     def keys(self) -> list[str]:
@@ -115,7 +125,7 @@ class SidList(list):
 
 
 class FacilityDict(dict):
-    """Dictionary supporting standard ATC role aliases and case-insensitive access."""
+    """Dictionary supporting standard ATC role aliases and case-insensitive access with synchronized mutation."""
 
     @staticmethod
     def _normalize_key(k: Any) -> str:
@@ -138,6 +148,26 @@ class FacilityDict(dict):
             if self._normalize_key(k) == norm:
                 return v
         return super().__getitem__(key)
+
+    def __setitem__(self, key: Any, value: int) -> None:
+        norm = self._normalize_key(key)
+        # Update any existing alias keys matching the same normalized role
+        for k in list(self.keys()):
+            if self._normalize_key(k) == norm:
+                super().__setitem__(k, value)
+        super().__setitem__(key, value)
+        if norm not in self:
+            super().__setitem__(norm, value)
+
+    def __delitem__(self, key: Any) -> None:
+        norm = self._normalize_key(key)
+        deleted = False
+        for k in list(self.keys()):
+            if self._normalize_key(k) == norm:
+                super().__delitem__(k)
+                deleted = True
+        if not deleted:
+            super().__delitem__(key)
 
     def __contains__(self, key: Any) -> bool:
         norm = self._normalize_key(key)
@@ -188,6 +218,12 @@ class AirportInfo:
         return self.facilities.get("ATIS")
 
     def __contains__(self, item: Any) -> bool:
+        if isinstance(item, Runway):
+            return item in self.runways
+        if isinstance(item, SID):
+            return item in self.sids
+        if isinstance(item, Facility):
+            return item.frequency_hz in self.facilities.values()
         if isinstance(item, str):
             return item in self.sids or item in self.runways or item in self.facilities
-        return False
+        return item in self.runways or item in self.sids
