@@ -538,3 +538,110 @@ def test_build_system_prompt_empty_facilities_and_runways():
     assert "WAHH" in prompt
     assert "PK-TST" in prompt
 
+
+# ============================================================================
+# 6. Fix Round 1 Review Findings Tests
+# ============================================================================
+
+def test_verify_readback_callsign_validation():
+    """Verify callsign validation with ICAO telephony aliases, numbers, and errors."""
+    expected = {
+        "callsign": "GIA123",
+        "runway": "11",
+        "squawk": "5201",
+    }
+
+    # 1. Matching airline spoken name (Garuda 123)
+    res_garuda = verify_readback("Garuda 123, runway 11, squawk 5201", expected)
+    assert res_garuda.is_valid is True
+    assert res_garuda.matched_items["callsign"] == "GIA123"
+
+    # 2. Matching airline ICAO telephony (Indonesia 123)
+    res_indo = verify_readback("Indonesia 123, runway 11, squawk 5201", expected)
+    assert res_indo.is_valid is True
+
+    # 3. Matching ICAO code direct (GIA 123)
+    res_gia = verify_readback("GIA 123, runway 11, squawk 5201", expected)
+    assert res_gia.is_valid is True
+
+    # 4. Spoken number words (Garuda one two three)
+    res_words = verify_readback("Garuda one two three, runway 11, squawk 5201", expected)
+    assert res_words.is_valid is True
+
+    # 5. Wrong flight number (Garuda 456)
+    res_wrong_num = verify_readback("Garuda 456, runway 11, squawk 5201", expected)
+    assert res_wrong_num.is_valid is False
+    assert any("Callsign mismatch" in err and "456" in err for err in res_wrong_num.errors)
+
+    # 6. Wrong airline (Lion 123)
+    res_wrong_airline = verify_readback("Lion 123, runway 11, squawk 5201", expected)
+    assert res_wrong_airline.is_valid is False
+    assert any("Callsign mismatch" in err and "Lion" in err for err in res_wrong_airline.errors)
+
+    # 7. Missing callsign
+    res_missing = verify_readback("Runway 11, squawk 5201", expected)
+    assert res_missing.is_valid is False
+    assert "callsign" in res_missing.missing_items
+
+
+def test_verify_readback_squawk_non_octal_digits_error():
+    """Verify that pilot reading erroneous non-octal squawk (e.g. 5280) emits mismatch error not missing."""
+    expected = {
+        "squawk": "5201",
+        "runway": "11",
+    }
+    # Pilot reads squawk with non-octal digit '8'
+    res = verify_readback("Runway 11, squawk 5280, Garuda 123", expected)
+    assert res.is_valid is False
+    assert "squawk" not in res.missing_items
+    assert any("Squawk mismatch" in err and "5280" in err for err in res.errors)
+
+
+def test_verify_readback_strict_hold_short_runway_enforcement():
+    """Verify that specific runway in hold_short strictly requires runway identifier in readback."""
+    expected = {"hold_short": "11"}
+
+    # 1. Pilot states bare "holding short" without runway identifier -> rejected!
+    res_bare = verify_readback("Holding short, Garuda 123", expected)
+    assert res_bare.is_valid is False
+    assert any("Hold short runway omitted" in err for err in res_bare.errors)
+
+    # 2. Pilot states holding short with correct runway -> accepted
+    res_with_rwy = verify_readback("Holding short runway 11, Garuda 123", expected)
+    assert res_with_rwy.is_valid is True
+    assert res_with_rwy.matched_items["hold_short"] == "11"
+
+    # 3. Bare hold short when expected is True (not runway specific) -> accepted
+    res_bare_ok = verify_readback("Holding short, Garuda 123", {"hold_short": True})
+    assert res_bare_ok.is_valid is True
+
+
+def test_verify_readback_runway_designator_words_normalization():
+    """Verify spoken runway designators 'left', 'right', 'center' and Indonesian equivalents."""
+    # 1. English "runway 25 left" matches "25L"
+    res_left = verify_readback("Runway 25 left, squawk 5201", {"runway": "25L", "squawk": "5201"})
+    assert res_left.is_valid is True
+    assert res_left.matched_items["runway"] == "25L"
+
+    # 2. English spoken digits "two five right" matches "25R"
+    res_right = verify_readback("Runway two five right, squawk 5201", {"runway": "25R", "squawk": "5201"})
+    assert res_right.is_valid is True
+
+    # 3. Indonesian "landas pacu 25 kiri" matches "25L"
+    res_kiri = verify_readback("Landas pacu dua lima kiri, squawk 5201", {"runway": "25L", "squawk": "5201"})
+    assert res_kiri.is_valid is True
+
+    # 4. Indonesian "landas pacu 07 kanan" matches "07R"
+    res_kanan = verify_readback("Landas pacu 07 kanan, squawk 5201", {"runway": "07R", "squawk": "5201"})
+    assert res_kanan.is_valid is True
+
+    # 5. Center designator "runway 25 center" matches "25C"
+    res_center = verify_readback("Runway 25 center, squawk 5201", {"runway": "25C", "squawk": "5201"})
+    assert res_center.is_valid is True
+
+    # 6. Hold short with designator "holding short runway 25 left"
+    res_hs_left = verify_readback("Holding short runway 25 left, Garuda 123", {"hold_short": "25L"})
+    assert res_hs_left.is_valid is True
+    assert res_hs_left.matched_items["hold_short"] == "25L"
+
+

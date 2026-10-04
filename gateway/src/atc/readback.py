@@ -104,6 +104,26 @@ NATO_PHONETICS: dict[str, str] = {
     "zulu": "Z",
 }
 
+# Airline Telephony Designators and Spoken Aliases
+AIRLINE_TELEPHONY: dict[str, list[str]] = {
+    "GIA": ["garuda", "indonesia", "gia"],
+    "GARUDA": ["garuda", "indonesia", "gia"],
+    "INDONESIA": ["garuda", "indonesia", "gia"],
+    "LNI": ["lion", "lion air", "lni"],
+    "LION": ["lion", "lion air", "lni"],
+    "CTV": ["citilink", "supergreen", "ctv"],
+    "CITILINK": ["citilink", "supergreen", "ctv"],
+    "SUPERGREEN": ["citilink", "supergreen", "ctv"],
+    "BTK": ["batik", "btk"],
+    "BATIK": ["batik", "btk"],
+    "AWQ": ["airasia", "wagon air", "awq"],
+    "AIRASIA": ["airasia", "wagon air", "awq"],
+    "SJY": ["sriwijaya", "sjy"],
+    "SRIWIJAYA": ["sriwijaya", "sjy"],
+    "SJV": ["super air jet", "sjv"],
+}
+
+
 
 def normalize_text_and_numbers(text: str) -> str:
     """
@@ -166,7 +186,16 @@ def normalize_text_and_numbers(text: str) -> str:
     if digit_buffer:
         collapsed_tokens.append("".join(digit_buffer))
 
-    return " ".join(collapsed_tokens)
+    result = " ".join(collapsed_tokens)
+
+    # 5. Normalize runway designators Left / Right / Center (English and Indonesian)
+    # e.g. "25 left" -> "25l", "25 kiri" -> "25l", "25 right" -> "25r", "25 center" -> "25c"
+    result = re.sub(r"\b(\d{1,2})\s*(?:left|kiri)\b", r"\g<1>l", result)
+    result = re.sub(r"\b(\d{1,2})\s*(?:right|kanan)\b", r"\g<1>r", result)
+    result = re.sub(r"\b(\d{1,2})\s*(?:center|centre|tengah)\b", r"\g<1>c", result)
+
+    return result
+
 
 
 def expand_nato_to_letters(text: str) -> str:
@@ -256,19 +285,19 @@ def verify_readback(pilot_text: str, expected_items: dict[str, Any]) -> Readback
     if squawk_key is not None:
         expected_squawk = str(expected_items[squawk_key]).strip().zfill(4)
 
-        # Look for explicit squawk keyword: "squawk 5201", "transponder 5201"
-        sq_match = re.search(r"\b(?:squawk|transponder|beacon)\s*([0-7]{4})\b", norm)
+        # Look for explicit squawk keyword: "squawk 5201", "transponder 5201", "squawk 5280"
+        sq_match = re.search(r"\b(?:squawk|transponder|beacon)\s*(\d{4})\b", norm)
         found_squawk: Optional[str] = None
 
         if sq_match:
             found_squawk = sq_match.group(1)
         else:
-            # Fallback: look for 4-digit octal number that is NOT the QNH value
-            qnh_val_str = str(matched_items.get("qnh", expected_items.get("qnh", "")))
-            octals = re.findall(r"\b([0-7]{4})\b", norm)
-            for octal in octals:
-                if octal != qnh_val_str:
-                    found_squawk = octal
+            # Fallback: look for 4-digit number that is NOT the QNH value
+            qnh_val_str = str(matched_items.get(qnh_key if qnh_key else "", expected_items.get("qnh", "")))
+            four_digits = re.findall(r"\b(\d{4})\b", norm)
+            for fd in four_digits:
+                if fd != qnh_val_str:
+                    found_squawk = fd
                     break
 
         if found_squawk is not None:
@@ -278,6 +307,7 @@ def verify_readback(pilot_text: str, expected_items: dict[str, Any]) -> Readback
                 errors.append(f"Squawk mismatch: expected {expected_squawk}, got {found_squawk}")
         else:
             missing_items.append(squawk_key)
+
 
     # -------------------------------------------------------------------------
     # 3. Runway Verification
@@ -375,11 +405,10 @@ def verify_readback(pilot_text: str, expected_items: dict[str, Any]) -> Readback
                         f"Hold short runway mismatch: expected {expected_hold}, got {found_hold_rwy.upper()}"
                     )
             else:
-                # Hold short mentioned without specific runway digits
-                if expected_hold.lstrip("0") in norm.split():
-                    matched_items[hold_key] = expected_hold
-                else:
-                    matched_items[hold_key] = True
+                # Bare "holding short" without runway identifier when specific runway was required
+                errors.append(
+                    f"Hold short runway omitted: expected runway {expected_hold}"
+                )
         else:
             missing_items.append(hold_key)
 
@@ -416,6 +445,75 @@ def verify_readback(pilot_text: str, expected_items: dict[str, Any]) -> Readback
         else:
             missing_items.append(alt_key)
 
+    # -------------------------------------------------------------------------
+    # 7. Callsign Verification
+    # -------------------------------------------------------------------------
+    callsign_key = next((k for k in ("callsign", "flight_callsign") if k in expected_items), None)
+    if callsign_key is not None:
+        expected_cs = str(expected_items[callsign_key]).strip().upper()
+        # Parse expected callsign into alpha prefix and digits
+        # e.g. "GIA123" -> prefix "GIA", digits "123"
+        # e.g. "GARUDA 123" -> prefix "GARUDA", digits "123"
+        # e.g. "PK-LION" -> prefix "PK", "LION"
+        m_exp = re.match(r"^([A-Z\-]+)\s*(\d+)?([A-Z]+)?$", expected_cs)
+        exp_prefix = m_exp.group(1).replace("-", "") if m_exp else expected_cs
+        exp_digits = m_exp.group(2) if m_exp and m_exp.group(2) else ""
+
+        acceptable_names = list(AIRLINE_TELEPHONY.get(exp_prefix, [exp_prefix.lower()]))
+        if exp_prefix.lower() not in acceptable_names:
+            acceptable_names.append(exp_prefix.lower())
+
+        cs_candidates = re.findall(r"\b([a-z]+)\s*(\d{1,4}[a-z]?)\b", norm)
+        reg_candidates = re.findall(r"\b(pk\s*[-a-z0-9]+)\b", norm)
+
+        matched_cs = False
+        mismatch_found: Optional[str] = None
+
+        clean_exp_cs = expected_cs.replace("-", "").replace(" ", "").lower()
+        clean_norm = norm.replace("-", "").replace(" ", "").lower()
+        if clean_exp_cs in clean_norm:
+            matched_cs = True
+
+        ignored_keywords = {
+            "runway", "rwy", "rw", "landas", "landasan", "pacu",
+            "qnh", "altimeter", "squawk", "transponder", "beacon",
+            "climb", "maintain", "wind", "heading", "ketinggian", "tekanan",
+        }
+
+        if not matched_cs and exp_digits:
+            for airline, num in cs_candidates:
+                if airline in ignored_keywords:
+                    continue
+                airline_matches = any(alias == airline for alias in acceptable_names)
+                digits_match = (num == exp_digits)
+
+                if airline_matches and digits_match:
+                    matched_cs = True
+                    break
+                elif airline_matches and not digits_match:
+                    mismatch_found = f"{airline.title()} {num}"
+                elif not airline_matches and digits_match:
+                    mismatch_found = f"{airline.title()} {num}"
+                elif not airline_matches and not digits_match:
+                    if airline in AIRLINE_TELEPHONY or airline in ("lion", "citilink", "batik", "airasia", "garuda"):
+                        mismatch_found = f"{airline.title()} {num}"
+
+        if not matched_cs and not mismatch_found:
+            for reg in reg_candidates:
+                clean_reg = reg.replace(" ", "").replace("-", "")
+                if clean_reg == clean_exp_cs:
+                    matched_cs = True
+                    break
+                else:
+                    mismatch_found = reg.upper()
+
+        if matched_cs:
+            matched_items[callsign_key] = expected_cs
+        elif mismatch_found:
+            errors.append(f"Callsign mismatch: expected {expected_cs}, got {mismatch_found}")
+        else:
+            missing_items.append(callsign_key)
+
     is_valid = len(errors) == 0 and len(missing_items) == 0
     return ReadbackResult(
         is_valid=is_valid,
@@ -423,3 +521,4 @@ def verify_readback(pilot_text: str, expected_items: dict[str, Any]) -> Readback
         matched_items=matched_items,
         missing_items=missing_items,
     )
+
