@@ -92,6 +92,11 @@ class GeminiLiveClient:
                 audio=types.Blob(data=data, mime_type=mime_type)
             )
 
+    async def send_end_of_turn(self) -> None:
+        """Signal end of turn to prompt immediate model response generation without VAD delay."""
+        if self._session is not None:
+            await self._session.send(end_of_turn=True)
+
     async def receive_stream(self) -> AsyncIterator[dict[str, Any]]:
         """
         Asynchronously yield response chunks (audio PCM and text transcripts)
@@ -149,6 +154,7 @@ class MockGeminiLiveClient(GeminiLiveClient):
         self.connected_event = asyncio.Event()
         self.receive_queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
         self.closed = False
+        self.end_of_turn_count = 0
 
     async def connect(self, system_instruction: Optional[str] = None) -> None:
         self._is_connected = True
@@ -166,6 +172,9 @@ class MockGeminiLiveClient(GeminiLiveClient):
         mime_type: str = "audio/pcm;rate=24000",
     ) -> None:
         self.sent_audio_chunks.append(data)
+
+    async def send_end_of_turn(self) -> None:
+        self.end_of_turn_count += 1
 
     async def receive_stream(self) -> AsyncIterator[dict[str, Any]]:
         while not self.closed:

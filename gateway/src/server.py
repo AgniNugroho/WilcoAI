@@ -151,6 +151,8 @@ async def websocket_atc(
     })
 
     relay_task: Optional[asyncio.Task] = None
+    last_injected_prompt: Optional[str] = None
+    is_new_ptt_burst: bool = False
 
     async def relay_gemini_to_client():
         try:
@@ -166,11 +168,12 @@ async def websocket_atc(
         except Exception as e:
             logger.debug(f"Relay stream exception: {e}")
 
-    # Start relay worker
-    relay_task = asyncio.create_task(relay_gemini_to_client())
-
     async def handle_audio_payload(audio_bytes: bytes):
-        nonlocal is_frequency_valid, flight_session, airport, atis_state, relay_task
+        nonlocal is_frequency_valid, flight_session, airport, atis_state, relay_task, last_injected_prompt, is_new_ptt_burst
+        # Guard: Ignore empty audio chunks
+        if not audio_bytes:
+            return
+
         if not is_frequency_valid:
             await websocket.send_json({
                 "type": "status",
@@ -184,8 +187,13 @@ async def websocket_atc(
             await gemini_client.connect(system_instruction=prompt)
             if relay_task is None or relay_task.done():
                 relay_task = asyncio.create_task(relay_gemini_to_client())
+            last_injected_prompt = prompt
+            is_new_ptt_burst = False
+        elif prompt != last_injected_prompt or is_new_ptt_burst:
+            await gemini_client.send_text_context(prompt)
+            last_injected_prompt = prompt
+            is_new_ptt_burst = False
 
-        await gemini_client.send_text_context(prompt)
         await gemini_client.send_audio_chunk(audio_bytes)
 
     try:
@@ -290,6 +298,7 @@ async def websocket_atc(
                         is_frequency_valid = current_facility is not None
 
                     if state == "pressed":
+                        is_new_ptt_burst = True
                         if not is_frequency_valid:
                             await websocket.send_json({
                                 "type": "status",
@@ -304,6 +313,9 @@ async def websocket_atc(
                                 "facility": current_facility.name if current_facility else None,
                             })
                     else:
+                        is_new_ptt_burst = False
+                        if gemini_client.is_connected:
+                            await gemini_client.send_end_of_turn()
                         await websocket.send_json({
                             "type": "status",
                             "action": "IDLE",

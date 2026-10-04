@@ -290,3 +290,100 @@ def test_weather_telemetry_updates_atis(client, mock_gemini):
         last_context = mock_gemini.sent_contexts[-1]
         assert "1008 hPa" in last_context or "1008" in last_context
 
+
+def test_prompt_injection_caching_across_audio_chunks(client, mock_gemini):
+    """
+    Verify prompt is cached and NOT reinjected on every audio frame
+    during high-frequency audio streaming, but reinjected on prompt change or PTT burst.
+    """
+    with client.websocket_connect("/ws/atc") as ws:
+        ws.receive_json()  # CONNECTED
+
+        # Tune to Tower
+        ws.send_json({"type": "telemetry", "data": {"frequency": 118.200, "callsign": "GIA123"}})
+        ws.receive_json()  # TUNED
+
+        # Stream 5 consecutive audio chunks (simulating 50ms chunk streaming)
+        for i in range(5):
+            ws.send_bytes(f"audio_chunk_{i}".encode())
+        import time
+        time.sleep(0.15)
+
+        # Context prompt should only be injected ONCE for the initial transmission
+        assert len(mock_gemini.sent_audio_chunks) == 5
+        assert len(mock_gemini.sent_contexts) == 1
+
+        # Now change telemetry callsign (modifies prompt)
+        ws.send_json({"type": "telemetry", "data": {"callsign": "LNI456"}})
+        ws.receive_json()  # TUNED
+
+        # Stream 3 more audio chunks
+        for i in range(3):
+            ws.send_bytes(f"new_audio_chunk_{i}".encode())
+        time.sleep(0.15)
+
+        # Prompt should now be injected a second time (with new callsign) and cached
+        assert len(mock_gemini.sent_audio_chunks) == 8
+        assert len(mock_gemini.sent_contexts) == 2
+        assert "LNI456" in mock_gemini.sent_contexts[-1]
+
+        # Start a new PTT transmission burst
+        ws.send_json({"type": "ptt", "state": "pressed"})
+        ws.receive_json()  # TRANSMITTING
+        ws.send_bytes(b"burst_chunk_0")
+        ws.send_bytes(b"burst_chunk_1")
+        time.sleep(0.15)
+
+        # PTT burst triggers burst context injection once, not on every chunk in burst
+        assert len(mock_gemini.sent_contexts) == 3
+        assert len(mock_gemini.sent_audio_chunks) == 10
+
+
+def test_ptt_release_signals_end_of_turn(client, mock_gemini):
+    """Verify releasing PTT invokes send_end_of_turn() on active Gemini Live session."""
+    with client.websocket_connect("/ws/atc") as ws:
+        ws.receive_json()  # CONNECTED
+
+        # Tune to Tower and send audio to activate session
+        ws.send_json({"type": "telemetry", "data": {"frequency": 118.200}})
+        ws.receive_json()  # TUNED
+        ws.send_bytes(b"some_audio")
+        import time
+        time.sleep(0.1)
+
+        assert mock_gemini.is_connected
+        assert mock_gemini.end_of_turn_count == 0
+
+        # Press and release PTT
+        ws.send_json({"type": "ptt", "state": "pressed"})
+        ws.receive_json()  # TRANSMITTING
+
+        ws.send_json({"type": "ptt", "state": "released"})
+        idle_resp = ws.receive_json()
+        assert idle_resp["action"] == "IDLE"
+
+        # End of turn must be signaled to model
+        assert mock_gemini.end_of_turn_count == 1
+
+
+def test_empty_audio_chunk_guard(client, mock_gemini):
+    """Verify empty audio frames are safely guarded and discarded."""
+    with client.websocket_connect("/ws/atc") as ws:
+        ws.receive_json()  # CONNECTED
+
+        # Tune to Tower
+        ws.send_json({"type": "telemetry", "data": {"frequency": 118.200}})
+        ws.receive_json()  # TUNED
+
+        # Send empty binary chunk
+        ws.send_bytes(b"")
+
+        # Send empty JSON audio chunk
+        ws.send_json({"type": "audio", "data": ""})
+
+        import time
+        time.sleep(0.1)
+
+        # Zero audio chunks forwarded to Gemini
+        assert len(mock_gemini.sent_audio_chunks) == 0
+
