@@ -47,16 +47,16 @@
 **Interfaces:**
 - Produces: Base project structure for `gateway` and `client`, buildable via `pip` and `cargo`/`npm`.
 
-- [ ] **Step 1: Create Python gateway environment configuration**
+- [x] **Step 1: Create Python gateway environment configuration**
   Define `requirements.txt` with `fastapi>=0.115.0`, `uvicorn[standard]>=0.30.0`, `google-genai>=0.1.1`, `websockets>=13.0`, `pydantic>=2.8.0`, `pytest>=8.0.0`, `pytest-asyncio>=0.23.0`.
-- [ ] **Step 2: Create Tauri v2 client workspace & Cargo configuration**
+- [x] **Step 2: Create Tauri v2 client workspace & Cargo configuration**
   Define `Cargo.toml` with dependencies: `tauri = { version = "2", features = [] }`, `tokio = { version = "1", features = ["full"] }`, `cpal = "0.15"`, `ringbuf = "0.3"`, `biquad = "0.4"`, `gilrs = "0.10"`, `global-hotkey = "0.5"`, `serde = { version = "1", features = ["derive"] }`, `serde_json = "1"`.
-- [ ] **Step 3: Setup Vite/React package.json and tsconfig**
+- [x] **Step 3: Setup Vite/React package.json and tsconfig**
   Setup modern lightweight web frontend dependencies (React 18 / Lucide icons / Tailwind CSS).
-- [ ] **Step 4: Verify build scaffolding**
+- [x] **Step 4: Verify build scaffolding**
   Run: `python -m pip install -r gateway/requirements.txt`
   Expected: Clean install without conflicts.
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
   Run: `git add gateway client; git commit -m "chore: scaffold project structure for gateway and tauri client"`
 
 ---
@@ -76,22 +76,22 @@
   - `load_airport(custom_data_path: str, icao: str) -> AirportInfo`
   - `get_facility_by_freq(airport: AirportInfo, frequency_hz: int) -> Optional[Facility]`
 
-- [ ] **Step 1: Write failing test in `gateway/tests/test_navdata.py`**
+- [x] **Step 1: Write failing test in `gateway/tests/test_navdata.py`**
   Write tests that point to `D:\SteamLibrary\steamapps\common\X-Plane 12\Custom Data`, load `WAHI` and `WAHH`, and assert:
   - WAHI (YIA) has Tower frequency `118.200` MHz (`118200000` Hz) and Ground `121.650` MHz (`121650000` Hz).
   - WAHI has Runways `11` and `29`, transition altitude `11000`.
   - WAHI contains SID `CA2L` and `CLP2F`.
   - WAHH has Tower `118.100` MHz and Ground `121.900` MHz.
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
   Run: `pytest gateway/tests/test_navdata.py -v`
   Expected: FAIL (modules not found).
-- [ ] **Step 3: Implement `models.py`, `atc_parser.py`, and `cifp_parser.py`**
+- [x] **Step 3: Implement `models.py`, `atc_parser.py`, and `cifp_parser.py`**
   - Parse `1200 atc data/Earth nav data/atc.dat` for `CONTROLLER`, `FACILITY_ID`, `ROLE`, `FREQ`.
   - Parse `CIFP/WAHI.dat` and `CIFP/WAHH.dat` for runway identifiers, SIDs, and waypoints.
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
   Run: `pytest gateway/tests/test_navdata.py -v`
   Expected: PASS.
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
   Run: `git add gateway/src/navdata gateway/tests; git commit -m "feat(gateway): implement AIRAC 2606 NavData parser for ATC facilities and SIDs"`
 
 ---
