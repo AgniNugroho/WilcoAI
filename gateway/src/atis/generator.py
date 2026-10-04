@@ -1,7 +1,10 @@
 from __future__ import annotations
 import math
 from typing import Optional, Union
-from navdata.models import AirportInfo, Runway
+try:
+    from navdata.models import AirportInfo, Runway
+except ImportError:
+    from ..navdata.models import AirportInfo, Runway
 
 from .state import (
     AtisState,
@@ -41,13 +44,13 @@ def get_runway_heading(rwy: Runway) -> float:
     return 0.0
 
 
-def determine_active_runway(airport: AirportInfo, wind_deg: Union[int, float]) -> str:
+def determine_active_runway(airport: Optional[AirportInfo], wind_deg: Union[int, float]) -> str:
     """
     Select the runway most aligned with the wind direction to maximize headwind.
     Calculates headwind component = cos(radians(wind_deg - runway_heading)).
     """
     if not airport or not hasattr(airport, "runways") or not airport.runways:
-        return "11"
+        return ""
 
     best_rwy: Optional[Runway] = None
     best_headwind: float = -float("inf")
@@ -66,7 +69,7 @@ def determine_active_runway(airport: AirportInfo, wind_deg: Union[int, float]) -
         # Return clean ident (e.g. '11' or '29')
         return best_rwy.ident.upper().replace("RWY", "").replace("RW", "").strip()
 
-    return "11"
+    return airport.runways[0].ident.upper().replace("RWY", "").replace("RW", "").strip() if airport.runways else ""
 
 
 def generate_atis_text(
@@ -188,10 +191,11 @@ def evaluate_weather_update(
     curr_qnh = float(weather_update.qnh_hpa)
     qnh_changed = round(abs(curr_qnh - prev_qnh), 4) >= 1.0
 
-    # 3. Time elapsed check (>= 30 min / 1800 s)
+    # 3. Time elapsed check (>= 30 min / 1800 s, handling midnight rollover)
     prev_time = int(current_state.zulu_sec)
     curr_time = int(weather_update.zulu_sec)
-    time_advanced = (curr_time - prev_time) >= 1800
+    elapsed_sec = (curr_time - prev_time) if curr_time >= prev_time else (curr_time + 86400 - prev_time)
+    time_advanced = elapsed_sec >= 1800
 
     if runway_changed or qnh_changed or time_advanced:
         next_let = advance_letter(current_state.letter)

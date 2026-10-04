@@ -1,7 +1,10 @@
 from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Optional, Union, Any
-from navdata.models import AirportInfo
+try:
+    from navdata.models import AirportInfo
+except ImportError:
+    from ..navdata.models import AirportInfo
 
 
 PHONETIC_ALPHABET: dict[str, str] = {
@@ -61,11 +64,11 @@ class PhoneticLetter(str):
         return self._phonetic
 
     def __eq__(self, other: Any) -> bool:
+        if isinstance(other, PhoneticLetter):
+            return self._code == other._code
         if isinstance(other, str):
             other_up = other.upper()
             return super().__eq__(other_up) or other_up == self._code or other_up == self._phonetic
-        if isinstance(other, PhoneticLetter):
-            return self._code == other._code
         return super().__eq__(other)
 
     def __hash__(self) -> int:

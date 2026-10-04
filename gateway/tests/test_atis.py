@@ -95,6 +95,38 @@ def test_determine_active_runway_alignment(wahi_airport):
     assert determine_active_runway(wahi_airport, wind_deg=300) == "29"
 
 
+def test_determine_active_runway_empty_fallback():
+    """Test runway selection with empty runways falls back to empty string."""
+    empty_airport = AirportInfo(
+        icao="TEST",
+        name="Test Airport",
+        transition_alt=5000,
+        runways=RunwayList([]),
+        facilities={},
+    )
+    assert determine_active_runway(empty_airport, wind_deg=180) == ""
+    assert determine_active_runway(None, wind_deg=180) == ""
+
+
+def test_phonetic_letter_subclass_equality():
+    """Test PhoneticLetter comparison between PhoneticLetter instances and strings."""
+    pl_a1 = PhoneticLetter("ALPHA", "A")
+    pl_a2 = PhoneticLetter("ALPHA", "A")
+    pl_b = PhoneticLetter("BRAVO", "B")
+
+    # Instance equality
+    assert pl_a1 == pl_a2
+    assert pl_a1 != pl_b
+
+    # String equality
+    assert pl_a1 == "ALPHA"
+    assert pl_a1 == "A"
+    assert pl_a1 == "alpha"
+    assert pl_a1 == "a"
+    assert pl_a1 != "BRAVO"
+
+
+
 def test_wind_shift_changes_runway_and_increments_letter(wahi_airport):
     """Test wind shift changing active runway triggers ATIS letter increment."""
     weather_initial = TelemetryWeather(
@@ -230,6 +262,56 @@ def test_thirty_minute_timer_advances_letter(wahi_airport):
     assert state_30m.letter == "D"
     assert state_30m.observation_time == "0130 UTC"
     assert state_30m.zulu_sec == 5400
+
+
+def test_thirty_minute_timer_crosses_midnight_rollover(wahi_airport):
+    """Test 30-minute interval advances ATIS observation letter across 00:00 UTC midnight rollover."""
+    # 23:50 UTC = 85800 seconds
+    weather_initial = TelemetryWeather(
+        wind_deg=110,
+        wind_kts=8,
+        visibility_m=10000,
+        clouds="clear",
+        temp_c=25,
+        dewpoint_c=20,
+        qnh_hpa=1013.0,
+        zulu_sec=85800,  # 23:50 UTC
+    )
+    state = create_initial_atis(wahi_airport, weather_initial, letter="ECHO")
+
+    # 20 minutes later: 00:10 UTC (600 seconds) -> total elapsed 1200 sec, should NOT trigger
+    weather_20m = TelemetryWeather(
+        wind_deg=110,
+        wind_kts=8,
+        visibility_m=10000,
+        clouds="clear",
+        temp_c=25,
+        dewpoint_c=20,
+        qnh_hpa=1013.0,
+        zulu_sec=600,  # 00:10 UTC
+    )
+    updated, state_20m = evaluate_weather_update(state, wahi_airport, weather_20m)
+    assert updated is False
+    assert state_20m.letter == "ECHO"
+
+    # 35 minutes later: 00:25 UTC (1500 seconds) -> total elapsed 2100 sec, MUST trigger
+    weather_35m = TelemetryWeather(
+        wind_deg=110,
+        wind_kts=8,
+        visibility_m=10000,
+        clouds="clear",
+        temp_c=25,
+        dewpoint_c=20,
+        qnh_hpa=1013.0,
+        zulu_sec=1500,  # 00:25 UTC
+    )
+    updated, state_35m = evaluate_weather_update(state, wahi_airport, weather_35m)
+    assert updated is True
+    assert state_35m.letter == "FOXTROT"
+    assert state_35m.letter == "F"
+    assert state_35m.observation_time == "0025 UTC"
+    assert state_35m.zulu_sec == 1500
+
 
 
 def test_letter_wrap_around_zulu_to_alpha(wahi_airport):
