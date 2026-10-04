@@ -169,15 +169,28 @@ Wilco AI is an advanced, real-time virtual Air Traffic Control (ATC) companion a
 ---
 
 ### 3.5 Autonomous ATIS Broadcast Subsystem (Python Gateway + Rust Player)
-1. **Weather Ingestion:**
-   - Gateway reads X-Plane 12 weather parameters from telemetry: wind direction/speed, ambient temperature, QNH, and runway orientation.
-2. **ATIS Script Generator:**
-   - Generates standardized ICAO phonetic text matching the current ATIS phonetic letter (increments on significant weather change or hourly cycle):
+1. **Weather & Simulator Time Ingestion:**
+   - Gateway reads X-Plane 12 weather parameters and Zulu time: `sim/time/zulu_time_sec`, wind direction/speed, ambient temperature, QNH, and runway orientation.
+2. **Automatic Update Triggers (Schedule & SPECI):**
+   - **Periodic Schedule:** Automatically advances every 30–60 minutes synced to simulator Zulu time (matching standard METAR observation intervals).
+   - **Significant Weather Trigger (SPECI):** Automatically triggers immediate regeneration if:
+     - Wind direction shift changes active runway in use.
+     - Atmospheric pressure (QNH) shifts by $\ge 1$ hPa ($\ge 0.03$ inHg).
+     - Visibility or cloud ceiling changes significantly.
+   - **Phonetic Letter Progression:**
+     - The phonetic letter automatically increments sequentially: **Alpha $\rightarrow$ Bravo $\rightarrow$ Charlie $\dots \rightarrow$ Zulu $\rightarrow$ Alpha**.
+3. **ATIS Script Generator:**
+   - Generates standardized ICAO phonetic text matching the current ATIS phonetic letter and updated timestamp:
      > *"Yogyakarta International Information Charlie, time 0145 UTC. Runway in use 11. Wind 100 degrees 7 knots, visibility 10 kilometers, clouds few 3500 feet, temperature 29, dewpoint 23, QNH 1011. Advise controller on initial contact you have information Charlie."*
-3. **Loop Synthesizer & Cache:**
+4. **Seamless Audio Loop Synthesizer & Cache:**
    - Gateway synthesizes ATIS voice audio with continuous background static and caches the audio stream.
-4. **Local Radio Tuning Playback:**
+   - Transitions between old and new ATIS loops seamlessly at loop boundary without cutting off in mid-sentence.
+5. **Local Radio Tuning Playback:**
    - When pilot tunes COM1 or COM2 to the airport's ATIS frequency (e.g. 127.80 MHz), the Rust audio engine plays the ATIS loop seamlessly. Tuning away immediately stops playback.
+6. **Controller Synchronization & Readback Enforcement:**
+   - The active ATIS phonetic letter is immediately synchronized into the AI Controller's context.
+   - If a pilot checks in with an outdated letter, the AI Controller automatically corrects the pilot:
+     > *"Indonesia 123, Information Charlie is now current, QNH 1011. Cleared to..."*
 
 ---
 
