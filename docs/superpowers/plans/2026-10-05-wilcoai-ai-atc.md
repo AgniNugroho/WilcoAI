@@ -111,21 +111,21 @@
   - `evaluate_weather_update(current_state: AtisState, weather: TelemetryWeather) -> tuple[bool, AtisState]`
   - `generate_atis_text(airport: AirportInfo, letter: str, weather: TelemetryWeather, zulu_sec: int) -> str`
 
-- [ ] **Step 1: Write failing test in `gateway/tests/test_atis.py`**
+- [x] **Step 1: Write failing test in `gateway/tests/test_atis.py`**
   Test that:
   - Generating ATIS text produces standardized ICAO phraseology with phonetic letter, time in UTC, wind, visibility, clouds, temperature, dew point, QNH, and active runway.
   - Changing wind direction shifts active runway from 11 to 29 and triggers automatic letter increment (e.g. Alpha -> Bravo).
   - Shifting QNH by $\ge 1$ hPa triggers automatic SPECI update and increments phonetic letter.
   - Advancing time by 30+ minutes increments phonetic letter.
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
   Run: `pytest gateway/tests/test_atis.py -v`
   Expected: FAIL.
-- [ ] **Step 3: Implement `generator.py` and `state.py`**
+- [x] **Step 3: Implement `generator.py` and `state.py`**
   Implement runway selection logic based on wind component, letter progression (A -> B -> ... -> Z -> A), and standardized phonetic generation.
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
   Run: `pytest gateway/tests/test_atis.py -v`
   Expected: PASS.
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
   Run: `git add gateway/src/atis gateway/tests/test_atis.py; git commit -m "feat(gateway): implement autonomous ATIS state and ICAO script generator"`
 
 ---
@@ -147,21 +147,22 @@
   - `verify_readback(pilot_text: str, expected_items: dict) -> ReadbackResult`
   - `build_system_prompt(session: FlightSession, airport: AirportInfo, atis: AtisState) -> str`
 
-- [ ] **Step 1: Write failing test in `gateway/tests/test_state_machine.py`**
+- [x] **Step 1: Write failing test in `gateway/tests/test_state_machine.py`**
   Test:
   - Transition from `APRON_CLEARANCE` to `PUSHBACK_START` upon successful clearance readback.
   - Detection of readback error when pilot reads back wrong QNH or wrong squawk.
   - Bilingual prompt rules inclusion (standard ICAO English prompt with Indonesian phraseology recognition guidelines).
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
   Run: `pytest gateway/tests/test_state_machine.py -v`
   Expected: FAIL.
-- [ ] **Step 3: Implement `state_machine.py`, `readback.py`, and `prompt_builder.py`**
+- [x] **Step 3: Implement `state_machine.py`, `readback.py`, and `prompt_builder.py`**
   Write regex/rule-based readback validator and dynamic system instruction generator for Gemini Live API session.
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
   Run: `pytest gateway/tests/test_state_machine.py -v`
   Expected: PASS.
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
   Run: `git add gateway/src/atc gateway/tests/test_state_machine.py; git commit -m "feat(gateway): implement flight phase state machine and readback validation"`
+
 
 ---
 
@@ -180,7 +181,7 @@
   - Bidirectional relay to `google.genai.live` WebSocket.
   - Dead air generation when transmission is made on invalid/unmonitored frequency.
 
-- [ ] **Step 1: Write failing integration test in `gateway/tests/test_gateway_server.py`**
+- [x] **Step 1: Write failing integration test in `gateway/tests/test_gateway_server.py`**
   Test FastAPI WebSocket connection `/ws/atc`:
   - Connect client mock WebSocket.
   - Send telemetry frame with frequency `118.200` MHz (WAHI Tower).
@@ -188,15 +189,15 @@
   - Assert that mock Gemini Live receives context injection frame and audio chunk.
   - Send telemetry frame with invalid frequency `120.000` MHz.
   - Assert that gateway responds with `DEAD_AIR` action without forwarding to Gemini.
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
   Run: `pytest gateway/tests/test_gateway_server.py -v`
   Expected: FAIL.
-- [ ] **Step 3: Implement `gemini_client.py`, `config.py`, and `server.py`**
+- [x] **Step 3: Implement `gemini_client.py`, `config.py`, and `server.py`**
   Implement async session manager connecting via Google GenAI Live SDK or raw WSS with authentication, streaming PCM back to client.
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
   Run: `pytest gateway/tests/test_gateway_server.py -v`
   Expected: PASS.
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
   Run: `git add gateway/src gateway/tests; git commit -m "feat(gateway): implement FastAPI WebSocket gateway and Gemini Live client"`
 
 ---
