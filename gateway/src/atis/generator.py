@@ -1,11 +1,7 @@
 from __future__ import annotations
 import math
 from typing import Optional, Union
-
-try:
-    from navdata.models import AirportInfo, Runway
-except ImportError:
-    from gateway.src.navdata.models import AirportInfo, Runway
+from navdata.models import AirportInfo, Runway
 
 from .state import (
     AtisState,

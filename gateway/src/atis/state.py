@@ -1,11 +1,7 @@
 from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Optional, Union, Any
-
-try:
-    from navdata.models import AirportInfo
-except ImportError:
-    from gateway.src.navdata.models import AirportInfo
+from navdata.models import AirportInfo
 
 
 PHONETIC_ALPHABET: dict[str, str] = {
