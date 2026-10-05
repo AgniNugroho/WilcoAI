@@ -209,3 +209,62 @@ fn test_hardware_listeners_instantiation_mock() {
     assert!(!hotkey.is_running());
     hotkey.stop();
 }
+
+#[tokio::test]
+async fn test_radio_switch_emits_released_then_pressed() {
+    let manager = PttManager::new();
+    let mut rx = manager.subscribe();
+
+    // 1. Initial press on COM1
+    assert!(manager.trigger_press(RadioType::Com1));
+    assert_eq!(manager.state(), PttState::Transmitting(RadioType::Com1));
+    let ev1 = rx.recv().await.expect("recv Com1 press");
+    assert_eq!(ev1, PttEvent::Pressed { radio: RadioType::Com1 });
+
+    // 2. Direct switch to COM2 while COM1 is transmitting:
+    // Must emit Released for COM1 before Pressed for COM2
+    assert!(manager.trigger_press(RadioType::Com2));
+    assert_eq!(manager.state(), PttState::Transmitting(RadioType::Com2));
+
+    let ev2 = rx.recv().await.expect("recv Com1 release on switch");
+    assert_eq!(ev2, PttEvent::Released { radio: RadioType::Com1 });
+
+    let ev3 = rx.recv().await.expect("recv Com2 press on switch");
+    assert_eq!(ev3, PttEvent::Pressed { radio: RadioType::Com2 });
+
+    // 3. Switch back to COM1 while COM2 is transmitting:
+    // Must emit Released for COM2 before Pressed for COM1
+    assert!(manager.trigger_press(RadioType::Com1));
+    assert_eq!(manager.state(), PttState::Transmitting(RadioType::Com1));
+
+    let ev4 = rx.recv().await.expect("recv Com2 release on switch");
+    assert_eq!(ev4, PttEvent::Released { radio: RadioType::Com2 });
+
+    let ev5 = rx.recv().await.expect("recv Com1 press on switch");
+    assert_eq!(ev5, PttEvent::Pressed { radio: RadioType::Com1 });
+
+    // 4. Release COM1 returns to Idle
+    assert!(manager.trigger_release(RadioType::Com1));
+    assert_eq!(manager.state(), PttState::Idle);
+
+    let ev6 = rx.recv().await.expect("recv final Com1 release");
+    assert_eq!(ev6, PttEvent::Released { radio: RadioType::Com1 });
+}
+
+#[test]
+fn test_learning_mode_atomic_single_consumer() {
+    let manager = PttManager::new();
+
+    manager.start_learn_mode(RadioType::Com1);
+    assert_eq!(manager.is_learning(), Some(RadioType::Com1));
+
+    // First button press consumes the learn target atomically
+    manager.handle_joystick_press(5);
+    assert_eq!(manager.is_learning(), None);
+    assert_eq!(manager.get_binding(RadioType::Com1).joystick_button, Some(5));
+
+    // A second rapid button press should NOT overwrite the binding because learning was consumed
+    manager.handle_joystick_press(9);
+    assert_eq!(manager.get_binding(RadioType::Com1).joystick_button, Some(5));
+}
+

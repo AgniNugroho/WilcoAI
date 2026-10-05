@@ -76,49 +76,72 @@ impl HotkeyListener {
                 Ok(mgr) => Some(mgr),
                 Err(err) => {
                     eprintln!("Warning: Failed to initialize GlobalHotKeyManager: {:?}", err);
-                    None
+                    running.store(false, Ordering::SeqCst);
+                    return;
                 }
             };
 
             let mut active_com1: Option<HotKey> = None;
             let mut active_com2: Option<HotKey> = None;
+            let mut last_com1_key: Option<String> = None;
+            let mut last_com2_key: Option<String> = None;
 
-            // Helper to sync registrations with current manager config
+            // Helper to sync registrations with current manager config only when string changes
             let sync_bindings = |mgr: &Option<GlobalHotKeyManager>,
                                  cur_com1: &mut Option<HotKey>,
-                                 cur_com2: &mut Option<HotKey>| {
+                                 cur_com2: &mut Option<HotKey>,
+                                 last_c1: &mut Option<String>,
+                                 last_c2: &mut Option<String>| {
                 if let Some(ref m) = mgr {
                     let cfg = manager.get_config();
 
-                    // Update COM1 hotkey
-                    let new_com1 = cfg.com1.keyboard_key.as_deref().and_then(|k| parse_hotkey(k).ok());
-                    if new_com1 != *cur_com1 {
+                    // Update COM1 hotkey only if raw config string actually changed
+                    if cfg.com1.keyboard_key != *last_c1 {
+                        *last_c1 = cfg.com1.keyboard_key.clone();
                         if let Some(old) = cur_com1.take() {
                             let _ = m.unregister(old);
                         }
-                        if let Some(new_hk) = new_com1 {
-                            if m.register(new_hk).is_ok() {
-                                *cur_com1 = Some(new_hk);
+                        if let Some(ref key_str) = *last_c1 {
+                            match parse_hotkey(key_str) {
+                                Ok(new_hk) => {
+                                    if let Err(err) = m.register(new_hk) {
+                                        eprintln!("Warning: Failed to register COM1 hotkey '{}': {:?}", key_str, err);
+                                    } else {
+                                        *cur_com1 = Some(new_hk);
+                                    }
+                                }
+                                Err(err) => {
+                                    eprintln!("Warning: Invalid COM1 hotkey format '{}': {:?}", key_str, err);
+                                }
                             }
                         }
                     }
 
-                    // Update COM2 hotkey
-                    let new_com2 = cfg.com2.keyboard_key.as_deref().and_then(|k| parse_hotkey(k).ok());
-                    if new_com2 != *cur_com2 {
+                    // Update COM2 hotkey only if raw config string actually changed
+                    if cfg.com2.keyboard_key != *last_c2 {
+                        *last_c2 = cfg.com2.keyboard_key.clone();
                         if let Some(old) = cur_com2.take() {
                             let _ = m.unregister(old);
                         }
-                        if let Some(new_hk) = new_com2 {
-                            if m.register(new_hk).is_ok() {
-                                *cur_com2 = Some(new_hk);
+                        if let Some(ref key_str) = *last_c2 {
+                            match parse_hotkey(key_str) {
+                                Ok(new_hk) => {
+                                    if let Err(err) = m.register(new_hk) {
+                                        eprintln!("Warning: Failed to register COM2 hotkey '{}': {:?}", key_str, err);
+                                    } else {
+                                        *cur_com2 = Some(new_hk);
+                                    }
+                                }
+                                Err(err) => {
+                                    eprintln!("Warning: Invalid COM2 hotkey format '{}': {:?}", key_str, err);
+                                }
                             }
                         }
                     }
                 }
             };
 
-            sync_bindings(&hotkey_mgr, &mut active_com1, &mut active_com2);
+            sync_bindings(&hotkey_mgr, &mut active_com1, &mut active_com2, &mut last_com1_key, &mut last_com2_key);
 
             let event_receiver = GlobalHotKeyEvent::receiver();
 
@@ -162,7 +185,7 @@ impl HotkeyListener {
                 }
 
                 // Periodically sync bindings in case UI updated config
-                sync_bindings(&hotkey_mgr, &mut active_com1, &mut active_com2);
+                sync_bindings(&hotkey_mgr, &mut active_com1, &mut active_com2, &mut last_com1_key, &mut last_com2_key);
             }
 
             // Cleanup registered hotkeys on shutdown
@@ -174,6 +197,8 @@ impl HotkeyListener {
                     let _ = m.unregister(hk);
                 }
             }
+
+            running.store(false, Ordering::SeqCst);
         });
 
         self.thread_handle = Some(handle);

@@ -44,6 +44,7 @@ impl JoystickListener {
                 Ok(g) => g,
                 Err(err) => {
                     eprintln!("Warning: Failed to initialize Gilrs joystick subsystem: {:?}", err);
+                    running.store(false, Ordering::SeqCst);
                     return;
                 }
             };
@@ -70,6 +71,8 @@ impl JoystickListener {
                     thread::sleep(Duration::from_millis(10));
                 }
             }
+
+            running.store(false, Ordering::SeqCst);
         });
 
         self.thread_handle = Some(handle);

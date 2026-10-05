@@ -184,12 +184,19 @@ impl PttManager {
     /// Returns true if state transitioned, false if already transmitting on that radio.
     pub fn trigger_press(&self, radio: RadioType) -> bool {
         let mut state = self.state.write().unwrap();
-        if *state != PttState::Transmitting(radio) {
-            *state = PttState::Transmitting(radio);
-            let _ = self.event_tx.send(PttEvent::Pressed { radio });
-            true
-        } else {
-            false
+        match *state {
+            PttState::Transmitting(current) if current == radio => false,
+            PttState::Transmitting(old_radio) => {
+                let _ = self.event_tx.send(PttEvent::Released { radio: old_radio });
+                *state = PttState::Transmitting(radio);
+                let _ = self.event_tx.send(PttEvent::Pressed { radio });
+                true
+            }
+            PttState::Idle => {
+                *state = PttState::Transmitting(radio);
+                let _ = self.event_tx.send(PttEvent::Pressed { radio });
+                true
+            }
         }
     }
 
@@ -263,16 +270,13 @@ impl PttManager {
 
     /// Handles joystick / gamepad button press event
     pub fn handle_joystick_press(&self, button: u32) {
-        // If learning mode is active, bind this button to the target radio
-        if let Some(target) = self.is_learning() {
-            {
-                let mut cfg = self.config.write().unwrap();
-                match target {
-                    RadioType::Com1 => cfg.com1.joystick_button = Some(button),
-                    RadioType::Com2 => cfg.com2.joystick_button = Some(button),
-                }
+        // If learning mode is active, atomically check-and-consume the learn target
+        if let Some(target) = self.learn_target.write().unwrap().take() {
+            let mut cfg = self.config.write().unwrap();
+            match target {
+                RadioType::Com1 => cfg.com1.joystick_button = Some(button),
+                RadioType::Com2 => cfg.com2.joystick_button = Some(button),
             }
-            self.stop_learn_mode();
             return;
         }
 
@@ -305,16 +309,13 @@ impl PttManager {
 
     /// Handles keyboard key press event
     pub fn handle_keyboard_press(&self, key: &str) {
-        // If learning mode is active, bind this key to the target radio
-        if let Some(target) = self.is_learning() {
-            {
-                let mut cfg = self.config.write().unwrap();
-                match target {
-                    RadioType::Com1 => cfg.com1.keyboard_key = Some(key.to_string()),
-                    RadioType::Com2 => cfg.com2.keyboard_key = Some(key.to_string()),
-                }
+        // If learning mode is active, atomically check-and-consume the learn target
+        if let Some(target) = self.learn_target.write().unwrap().take() {
+            let mut cfg = self.config.write().unwrap();
+            match target {
+                RadioType::Com1 => cfg.com1.keyboard_key = Some(key.to_string()),
+                RadioType::Com2 => cfg.com2.keyboard_key = Some(key.to_string()),
             }
-            self.stop_learn_mode();
             return;
         }
 
