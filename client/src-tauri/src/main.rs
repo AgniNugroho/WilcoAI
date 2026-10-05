@@ -16,9 +16,6 @@ fn main() {
     let ptt_manager = Arc::new(PttManager::new());
     let app_state = AppState::new(xplane_manager.clone(), ptt_manager.clone());
 
-    // Spawn X-Plane UDP listener background receiver
-    xplane_manager.clone().spawn_background();
-
     tauri::Builder::default()
         .manage(app_state)
         .setup(|app| {
@@ -26,10 +23,13 @@ fn main() {
             let ptt_mgr = handle.state::<AppState>().ptt_manager.clone();
             let xp_mgr = handle.state::<AppState>().xplane_manager.clone();
 
+            // Spawn X-Plane UDP listener background receiver
+            xp_mgr.clone().spawn_background();
+
             // Background task: forward PTT events to webview with lag recovery
             let handle_ptt = handle.clone();
             let mut ptt_rx = ptt_mgr.subscribe();
-            tokio::spawn(async move {
+            tauri::async_runtime::spawn(async move {
                 loop {
                     match ptt_rx.recv().await {
                         Ok(evt) => {
@@ -49,7 +49,7 @@ fn main() {
             // Background task: monitor PTT learning mode and binding updates
             let handle_config = handle.clone();
             let ptt_mgr_cfg = ptt_mgr.clone();
-            tokio::spawn(async move {
+            tauri::async_runtime::spawn(async move {
                 let mut interval = tokio::time::interval(Duration::from_millis(50));
                 let mut last_cfg = ptt_mgr_cfg.get_config();
                 let mut was_learning = ptt_mgr_cfg.is_learning().is_some();
@@ -69,7 +69,7 @@ fn main() {
 
             // Background task: periodic telemetry and audio levels emission (10 Hz)
             let handle_telemetry = handle.clone();
-            tokio::spawn(async move {
+            tauri::async_runtime::spawn(async move {
                 let mut interval = tokio::time::interval(Duration::from_millis(100));
                 let mut tx_phase: f32 = 0.0;
                 loop {

@@ -214,8 +214,8 @@ impl XPlaneUdpManager {
     }
 
     /// Spawns the background receiver and keepalive tasks
-    pub fn spawn_background(self: Arc<Self>) -> tokio::task::JoinHandle<()> {
-        tokio::spawn(async move {
+    pub fn spawn_background(self: Arc<Self>) -> tauri::async_runtime::JoinHandle<()> {
+        tauri::async_runtime::spawn(async move {
             if let Err(e) = self.run_loop().await {
                 eprintln!("[XPlaneUdpManager] run_loop error: {e}");
             }
