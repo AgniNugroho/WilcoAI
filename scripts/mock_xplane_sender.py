@@ -408,6 +408,7 @@ class MockXPlaneSender:
         count: Optional[int] = None,
         once: bool = False,
         verbose: bool = False,
+        loop: bool = False,
     ) -> None:
         """Executes a simulation scenario broadcasting telemetry over UDP."""
         self.start_socket()
@@ -415,7 +416,7 @@ class MockXPlaneSender:
         if self.known_client_addr:
             print(f"[MockXPlane] Destination target set to {self.known_client_addr[0]}:{self.known_client_addr[1]}")
         else:
-            print(f"[MockXPlane] Waiting for client connection or incoming subscription...")
+            print(f"[MockXPlane] Waiting for client connection or incoming subscription on port {self.listen_port}...")
 
         waypoints = (
             DEPARTURE_WAHI_WAYPOINTS
@@ -425,44 +426,72 @@ class MockXPlaneSender:
 
         total_sent = 0
         try:
-            for phase_name, snapshot, duration in waypoints:
-                phase_start = time.time()
-                print(
-                    f"\n>>> [PHASE: {phase_name}] COM1: {snapshot.com1_hz / 1e6:.3f} MHz | "
-                    f"COM2: {snapshot.com2_hz / 1e6:.3f} MHz | Radio: COM{int(snapshot.active_radio_code) - 5} | "
-                    f"Alt AGL: {snapshot.agl_m:.1f}m | Spd: {snapshot.groundspeed_ms:.1f} m/s | "
-                    f"Ground: {bool(snapshot.on_ground)}"
-                )
-
-                while time.time() - phase_start < duration:
-                    # Ingest any incoming mute or subscription commands
+            # If no target was specified, pause at initial waypoint until a client connects
+            if self.known_client_addr is None and not (once and self.target_port):
+                initial_phase_name = waypoints[0][0]
+                print(f"[MockXPlane] Aircraft parked at {initial_phase_name}. Awaiting client UDP connection...")
+                wait_log_interval = 3.0
+                last_wait_log = time.time()
+                while self.known_client_addr is None:
                     self.poll_incoming()
-
-                    if self.mute_command_received and self.last_mute_value is not None:
-                        action = "MUTED (0.0)" if self.last_mute_value == 0.0 else f"UNMUTED ({self.last_mute_value})"
-                        # Print once per transition
+                    if self.known_client_addr is not None:
+                        print(
+                            f"[MockXPlane] Client connected from "
+                            f"{self.known_client_addr[0]}:{self.known_client_addr[1]}! "
+                            f"Commencing scenario '{scenario_name}'."
+                        )
+                        break
+                    time.sleep(0.05)
+                    if time.time() - last_wait_log >= wait_log_interval:
                         if verbose:
-                            print(f"[MockXPlane] Native ATC Audio {action}")
+                            print(f"[MockXPlane] Still waiting for client on port {self.listen_port}...")
+                        last_wait_log = time.time()
 
-                    if self.known_client_addr:
-                        sent = self.send_snapshot(snapshot)
-                        if sent:
-                            total_sent += 1
+            scenario_active = True
+            while scenario_active:
+                for phase_name, snapshot, duration in waypoints:
+                    phase_start = time.time()
+                    print(
+                        f"\n>>> [PHASE: {phase_name}] COM1: {snapshot.com1_hz / 1e6:.3f} MHz | "
+                        f"COM2: {snapshot.com2_hz / 1e6:.3f} MHz | Radio: COM{int(snapshot.active_radio_code) - 5} | "
+                        f"Alt AGL: {snapshot.agl_m:.1f}m | Spd: {snapshot.groundspeed_ms:.1f} m/s | "
+                        f"Ground: {bool(snapshot.on_ground)}"
+                    )
+
+                    while time.time() - phase_start < duration:
+                        # Ingest any incoming mute or subscription commands
+                        self.poll_incoming()
+
+                        if self.mute_command_received and self.last_mute_value is not None:
+                            action = "MUTED (0.0)" if self.last_mute_value == 0.0 else f"UNMUTED ({self.last_mute_value})"
+                            # Print once per transition
                             if verbose:
-                                print(
-                                    f"  -> Sent 110-byte RREF packet #{total_sent} to "
-                                    f"{self.known_client_addr[0]}:{self.known_client_addr[1]}"
-                                )
+                                print(f"[MockXPlane] Native ATC Audio {action}")
 
-                    if once:
-                        print("[MockXPlane] Single packet transmission complete (--once).")
-                        return
+                        if self.known_client_addr:
+                            sent = self.send_snapshot(snapshot)
+                            if sent:
+                                total_sent += 1
+                                if verbose:
+                                    print(
+                                        f"  -> Sent 110-byte RREF packet #{total_sent} to "
+                                        f"{self.known_client_addr[0]}:{self.known_client_addr[1]}"
+                                    )
 
-                    if count and total_sent >= count:
-                        print(f"[MockXPlane] Reached packet count limit ({count}). Exiting.")
-                        return
+                        if once:
+                            print("[MockXPlane] Single packet transmission complete (--once).")
+                            return
 
-                    time.sleep(self.interval_sec)
+                        if count and total_sent >= count:
+                            print(f"[MockXPlane] Reached packet count limit ({count}). Exiting.")
+                            return
+
+                        time.sleep(self.interval_sec)
+
+                if not loop:
+                    scenario_active = False
+                else:
+                    print("\n[MockXPlane] Scenario iteration complete. Looping from start (--loop)...")
 
         except KeyboardInterrupt:
             print("\n[MockXPlane] Simulation interrupted by user.")
@@ -517,6 +546,11 @@ def main() -> None:
         help="Send a single packet and exit",
     )
     parser.add_argument(
+        "--loop",
+        action="store_true",
+        help="Continuously loop the scenario sequence until interrupted",
+    )
+    parser.add_argument(
         "--verbose",
         "-v",
         action="store_true",
@@ -538,6 +572,7 @@ def main() -> None:
         count=args.count,
         once=args.once,
         verbose=args.verbose,
+        loop=args.loop,
     )
 
 

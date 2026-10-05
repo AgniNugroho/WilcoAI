@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import json
 import socket
 import struct
 import sys
@@ -83,7 +84,8 @@ from mock_xplane_sender import (
     IDX_WIND_DIR,
     DREF_ATC_VOLUME_RATIO,
 )
-from mock_atc_dialogue import generate_synthetic_pcm
+import websockets
+from mock_atc_dialogue import MockAtcDialogueClient, generate_synthetic_pcm
 
 
 # ==============================================================================
@@ -371,6 +373,104 @@ class TestGatewayWebSocket:
             assert idle_msg["type"] == "status"
             assert idle_msg["action"] == "IDLE"
             assert mock_gemini.end_of_turn_count >= 1
+
+    @pytest.mark.asyncio
+    async def test_mock_atc_dialogue_client_e2e_communication(self):
+        """
+        Verify MockAtcDialogueClient connects to gateway WebSocket, starts background
+        _listen_loop without AttributeError on websockets v14+, ingests telemetry,
+        handles PTT voice transmission, receives transcripts and audio, and disconnects cleanly.
+        """
+        received_payloads: list[dict] = []
+        received_audio_chunks: list[bytes] = []
+
+        async def mock_gateway_handler(ws):
+            # Send initial CONNECTED handshake frame
+            await ws.send(json.dumps({
+                "type": "status",
+                "action": "CONNECTED",
+                "airport": "WAHI",
+                "callsign": "GIA123",
+                "facility": "WAHI Ground",
+            }))
+
+            async for message in ws:
+                if isinstance(message, bytes):
+                    received_audio_chunks.append(message)
+                else:
+                    data = json.loads(message)
+                    received_payloads.append(data)
+                    msg_type = data.get("type")
+                    if msg_type == "telemetry":
+                        await ws.send(json.dumps({
+                            "type": "status",
+                            "action": "TUNED",
+                            "facility": "WAHI Ground",
+                            "role": "GND",
+                            "frequency_hz": 121650000,
+                        }))
+                    elif msg_type == "ptt":
+                        state = data.get("state")
+                        if state == "pressed":
+                            await ws.send(json.dumps({
+                                "type": "status",
+                                "action": "TRANSMITTING",
+                                "radio": data.get("radio", "COM1"),
+                            }))
+                        else:
+                            await ws.send(json.dumps({
+                                "type": "status",
+                                "action": "IDLE",
+                            }))
+                            # Relay simulated ATC response and audio
+                            await ws.send(json.dumps({
+                                "type": "transcript",
+                                "role": "atc",
+                                "text": "Garuda 123, pushback approved.",
+                            }))
+                            await ws.send(b"MOCK_ATC_AUDIO_BYTES_24K")
+
+        server = await websockets.serve(mock_gateway_handler, "127.0.0.1", 0)
+        port = server.sockets[0].getsockname()[1]
+
+        client = MockAtcDialogueClient(
+            url=f"ws://127.0.0.1:{port}",
+            callsign="GIA123",
+            aircraft_type="A320",
+            step_delay=0.05,
+        )
+
+        try:
+            # 1. Connect & verify handshake
+            handshake = await client.connect()
+            assert handshake["action"] == "CONNECTED"
+            assert handshake["airport"] == "WAHI"
+
+            # 2. Telemetry ingestion
+            await client.send_telemetry(com1_hz=121650000, active_radio="COM1")
+            await asyncio.sleep(0.05)
+            assert any(p.get("type") == "telemetry" for p in received_payloads)
+            assert any(m.get("action") == "TUNED" for m in client.received_messages)
+
+            # 3. Voice transmission (PTT pressed, audio streaming, PTT released)
+            await client.transmit_voice("Ground, Garuda 123, request pushback.", radio="COM1", duration_sec=0.15)
+            await asyncio.sleep(0.08)
+
+            assert any(p.get("type") == "ptt" and p.get("state") == "pressed" for p in received_payloads)
+            assert len(received_audio_chunks) >= 3
+            assert any(p.get("type") == "ptt" and p.get("state") == "released" for p in received_payloads)
+
+            # 4. Verify client received ATC transcript and binary audio
+            assert any(
+                m.get("type") == "transcript" and "pushback approved" in m.get("text", "")
+                for m in client.received_messages
+            )
+            assert b"MOCK_ATC_AUDIO_BYTES_24K" in client.received_audio_bytes
+
+        finally:
+            await client.close()
+            server.close()
+            await server.wait_closed()
 
 
 # ==============================================================================

@@ -30,8 +30,10 @@ from typing import Optional, Any
 
 try:
     import websockets
+    from websockets.exceptions import ConnectionClosed
 except ImportError:
     websockets = None
+    ConnectionClosed = Exception
 
 
 def generate_synthetic_pcm(
@@ -96,8 +98,12 @@ class MockAtcDialogueClient:
     async def _listen_loop(self) -> None:
         """Background listener receiving JSON frames and binary audio from Gateway."""
         try:
-            while self.ws and not self.ws.closed:
-                msg = await self.ws.recv()
+            while self.ws is not None:
+                try:
+                    msg = await self.ws.recv()
+                except (ConnectionClosed, asyncio.CancelledError):
+                    break
+
                 if isinstance(msg, bytes):
                     self.received_audio_bytes.append(msg)
                     print(f"  [GATEWAY AUDIO RX] Received {len(msg)} bytes audio PCM")
@@ -118,7 +124,7 @@ class MockAtcDialogueClient:
         except asyncio.CancelledError:
             pass
         except Exception as e:
-            if self.ws and not self.ws.closed:
+            if self.ws is not None:
                 print(f"[CLIENT] Listener loop ended: {e}")
 
     async def send_telemetry(
@@ -314,8 +320,13 @@ class MockAtcDialogueClient:
                 await self.listen_task
             except asyncio.CancelledError:
                 pass
-        if self.ws:
-            await self.ws.close()
+            self.listen_task = None
+        if self.ws is not None:
+            try:
+                await self.ws.close()
+            except Exception:
+                pass
+            self.ws = None
             print("[CLIENT] WebSocket connection closed.")
 
 
