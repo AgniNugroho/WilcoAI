@@ -216,20 +216,20 @@
   - `AircraftSnapshot`: struct containing `com1_hz`, `com2_hz`, `active_radio`, `lat`, `lon`, `elevation_m`, `agl_m`, `on_ground`, `squawk`, `qnh_inhg`, `groundspeed_ms`, `wind_speed`, `wind_dir`.
   - `XPlaneUdpManager`: runs background `UdpSocket` loop, sends `RREF` keepalive, parses `RREF,\0` stream, and sends `DREF` mute packet for `sim/operation/sound/radio_atc_volume_ratio`.
 
-- [ ] **Step 1: Write failing test in `client/src-tauri/tests/udp_test.rs`**
+- [x] **Step 1: Write failing test in `client/src-tauri/tests/udp_test.rs`**
   Test byte parsing of:
   - Formatted `RREF\0` subscription packet.
   - Simulated `RREF,\0` incoming payload with custom index and float32 values.
   - Formatted `DREF\0` packet setting volume to `0.0f32`.
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
   Run: `cargo test --test udp_test`
   Expected: FAIL.
-- [ ] **Step 3: Implement `packet.rs`, `listener.rs`, and `sender.rs` in Rust**
+- [x] **Step 3: Implement `packet.rs`, `listener.rs`, and `sender.rs` in Rust**
   Use `tokio::net::UdpSocket` and byte parsing logic without memory allocations in hot paths.
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
   Run: `cargo test --test udp_test`
   Expected: PASS.
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
   Run: `git add client/src-tauri; git commit -m "feat(client): implement X-Plane 12 UDP telemetry ingestion and ATC muter"`
 
 ---
@@ -250,20 +250,20 @@
   - `AudioPlayback`: plays incoming ATC chunks processed through `VhfDspFilter`.
   - `calculate_rms(samples: &[i16]) -> f32` (for VU meter).
 
-- [ ] **Step 1: Write failing test in `client/src-tauri/tests/dsp_test.rs`**
+- [x] **Step 1: Write failing test in `client/src-tauri/tests/dsp_test.rs`**
   Test that:
   - Frequency response below 300 Hz is attenuated by at least 18 dB.
   - Frequency response above 3400 Hz is attenuated by at least 18 dB.
   - Squelch open click (25 ms) and squelch tail click (60 ms) buffers are generated correctly without NaN/overflow.
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
   Run: `cargo test --test dsp_test`
   Expected: FAIL.
-- [ ] **Step 3: Implement `dsp.rs`, `capture.rs`, and `playback.rs` in Rust**
+- [x] **Step 3: Implement `dsp.rs`, `capture.rs`, and `playback.rs` in Rust**
   Implement 2nd-order biquad IIR bandpass filter, Gaussian noise generator, and lock-free ring buffer audio streaming.
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
   Run: `cargo test --test dsp_test`
   Expected: PASS.
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
   Run: `git add client/src-tauri; git commit -m "feat(client): implement VHF radio DSP bandpass, noise, and squelch engine"`
 
 ---
@@ -282,17 +282,17 @@
   - Emits `PttEvent::Pressed { radio: RadioType }` and `PttEvent::Released { radio: RadioType }` (supporting COM1 and COM2).
   - Button learning mode for UI mapping.
 
-- [ ] **Step 1: Write failing test in `client/src-tauri/tests/ptt_test.rs`**
+- [x] **Step 1: Write failing test in `client/src-tauri/tests/ptt_test.rs`**
   Test state transitions of PTT state machine from `Idle` to `Active(COM1)` and `Active(COM2)` to `Released`.
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
   Run: `cargo test --test ptt_test`
   Expected: FAIL.
-- [ ] **Step 3: Implement `joystick.rs`, `hotkey.rs`, and `ptt/mod.rs`**
+- [x] **Step 3: Implement `joystick.rs`, `hotkey.rs`, and `ptt/mod.rs`**
   Implement background polling thread using `gilrs` and Windows low-level global hotkey listener.
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
   Run: `cargo test --test ptt_test`
   Expected: PASS.
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
   Run: `git add client/src-tauri; git commit -m "feat(client): implement global PTT joystick and keyboard controller"`
 
 ---
@@ -312,17 +312,17 @@
 - Consumes: Tauri IPC events: `telemetry_update`, `audio_level_update`, `atc_transcript_update`, `ptt_state_change`.
 - Produces: Complete, responsive desktop UI running via Tauri v2.
 
-- [ ] **Step 1: Implement Tauri command handlers in `commands.rs`**
+- [x] **Step 1: Implement Tauri command handlers in `commands.rs`**
   Expose commands to frontend: `set_callsign`, `set_ptt_binding`, `set_dsp_settings`, `connect_gateway`.
-- [ ] **Step 2: Implement UI components**
+- [x] **Step 2: Implement UI components**
   - `RadioPanel.tsx`: Digital COM1/COM2 LED displays, active facility badge, and status indicators.
   - `VuMeter.tsx`: Real-time audio level bars for Mic in and ATC out.
   - `PttConfig.tsx`: Joystick button detection and assignment modal.
   - `TranscriptLog.tsx`: Live scrollable chat feed with pilot & ATC dialogue.
-- [ ] **Step 3: Build frontend and verify Tauri integration**
+- [x] **Step 3: Build frontend and verify Tauri integration**
   Run: `npm --prefix client run build`
   Expected: Clean build without TypeScript or bundling errors.
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
   Run: `git add client; git commit -m "feat(client): implement modern aviation UI and Tauri IPC bindings"`
 
 ---
