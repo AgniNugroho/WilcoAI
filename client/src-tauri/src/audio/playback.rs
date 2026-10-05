@@ -1,5 +1,5 @@
 use super::dsp::VhfDspFilter;
-use ringbuf::{HeapProducer, HeapRb};
+use ringbuf::{HeapConsumer, HeapProducer, HeapRb};
 use std::sync::{Arc, Mutex};
 
 /// Plays incoming ATC speech chunks processed through the VHF DSP filter
@@ -15,6 +15,7 @@ pub struct AudioPlayback {
 
 impl AudioPlayback {
     /// Creates real audio playback output stream using cpal.
+    /// Supports mono or multi-channel/stereo devices (duplicating mono to all channels).
     pub fn new(sample_rate: u32) -> Result<Self, String> {
         use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 
@@ -24,32 +25,85 @@ impl AudioPlayback {
             .ok_or_else(|| "No default output audio device found".to_string())?;
 
         let rb = HeapRb::<f32>::new(96000);
-        let (producer, mut consumer) = rb.split();
+        let (producer, consumer) = rb.split();
+        let consumer = Arc::new(Mutex::new(consumer));
 
-        let config = cpal::StreamConfig {
-            channels: 1,
-            sample_rate: cpal::SampleRate(sample_rate),
-            buffer_size: cpal::BufferSize::Default,
+        let default_channels = device
+            .default_output_config()
+            .map(|c| c.channels())
+            .unwrap_or(2);
+
+        let channels_to_try: Vec<u16> = if default_channels > 1 {
+            vec![default_channels, 1]
+        } else {
+            vec![1, 2]
         };
 
-        let err_callback = |err| eprintln!("Audio playback stream error: {}", err);
+        let mut last_error = String::new();
+        let mut active_stream: Option<cpal::Stream> = None;
 
-        let stream = device
-            .build_output_stream(
-                &config,
-                move |data: &mut [f32], _: &cpal::OutputCallbackInfo| {
-                    for sample in data.iter_mut() {
-                        *sample = consumer.pop().unwrap_or(0.0);
+        for ch in channels_to_try {
+            let config = cpal::StreamConfig {
+                channels: ch,
+                sample_rate: cpal::SampleRate(sample_rate),
+                buffer_size: cpal::BufferSize::Default,
+            };
+
+            let err_callback = |err| eprintln!("Audio playback stream error: {}", err);
+            let cons = Arc::clone(&consumer);
+            let ch_usize = ch as usize;
+
+            let stream_res = if ch == 1 {
+                // Direct mono playback
+                device.build_output_stream(
+                    &config,
+                    move |data: &mut [f32], _: &cpal::OutputCallbackInfo| {
+                        if let Ok(mut c) = cons.lock() {
+                            for sample in data.iter_mut() {
+                                *sample = c.pop().unwrap_or(0.0);
+                            }
+                        }
+                    },
+                    err_callback,
+                    None,
+                )
+            } else {
+                // Stereo / multichannel playback: duplicate mono ATC speech to all channels
+                device.build_output_stream(
+                    &config,
+                    move |data: &mut [f32], _: &cpal::OutputCallbackInfo| {
+                        if let Ok(mut c) = cons.lock() {
+                            for frame in data.chunks_exact_mut(ch_usize) {
+                                let sample = c.pop().unwrap_or(0.0);
+                                for out in frame.iter_mut() {
+                                    *out = sample;
+                                }
+                            }
+                        }
+                    },
+                    err_callback,
+                    None,
+                )
+            };
+
+            match stream_res {
+                Ok(stream) => {
+                    if let Err(e) = stream.play() {
+                        last_error = format!("Failed to play output stream (channels={}): {}", ch, e);
+                        continue;
                     }
-                },
-                err_callback,
-                None,
-            )
-            .map_err(|e| format!("Failed to create audio output stream: {}", e))?;
+                    active_stream = Some(stream);
+                    break;
+                }
+                Err(e) => {
+                    last_error = format!("Failed to build output stream (channels={}): {}", ch, e);
+                }
+            }
+        }
 
-        stream
-            .play()
-            .map_err(|e| format!("Failed to start audio output stream: {}", e))?;
+        let stream = active_stream.ok_or_else(|| {
+            format!("Failed to initialize audio playback device: {}", last_error)
+        })?;
 
         Ok(Self {
             sample_rate,
@@ -71,6 +125,23 @@ impl AudioPlayback {
             producer: None,
             _stream: None,
         }
+    }
+
+    /// Creates a mock AudioPlayback instance with a real bounded ring buffer to test buffer overflows.
+    pub fn new_mock_with_buffer(sample_rate: u32, capacity: usize) -> (Self, HeapConsumer<f32>) {
+        let rb = HeapRb::<f32>::new(capacity);
+        let (producer, consumer) = rb.split();
+        (
+            Self {
+                sample_rate,
+                filter: VhfDspFilter::new(sample_rate),
+                is_transmitting: false,
+                mock_sink: Some(Arc::new(Mutex::new(Vec::new()))),
+                producer: Some(producer),
+                _stream: None,
+            },
+            consumer,
+        )
     }
 
     /// Emits squelch open click and marks transmission as active.
@@ -105,6 +176,7 @@ impl AudioPlayback {
     }
 
     /// Internal helper to push samples to either real output stream or mock sink.
+    /// Tracks ring buffer capacity and logs a warning on overflow drops.
     fn enqueue_samples(&mut self, samples: &[f32]) {
         if let Some(ref sink) = self.mock_sink {
             if let Ok(mut lock) = sink.lock() {
@@ -112,7 +184,14 @@ impl AudioPlayback {
             }
         }
         if let Some(ref mut prod) = self.producer {
-            prod.push_slice(samples);
+            let pushed = prod.push_slice(samples);
+            if pushed < samples.len() {
+                let dropped = samples.len() - pushed;
+                eprintln!(
+                    "Warning: AudioPlayback ring buffer overflow: dropped {} samples (pushed {}/{})",
+                    dropped, pushed, samples.len()
+                );
+            }
         }
     }
 

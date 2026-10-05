@@ -14,6 +14,7 @@ pub struct AudioCapture {
 
 impl AudioCapture {
     /// Creates a real audio capture stream using cpal on the default input device.
+    /// Supports mono or multi-channel/stereo devices (downmixing stereo/multi-channel to mono).
     pub fn new(sample_rate: u32) -> Result<Self, String> {
         use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 
@@ -27,54 +28,130 @@ impl AudioCapture {
         let producer = Arc::new(Mutex::new(producer));
         let is_capturing = Arc::new(AtomicBool::new(true));
 
-        let config = cpal::StreamConfig {
-            channels: 1,
-            sample_rate: cpal::SampleRate(sample_rate),
-            buffer_size: cpal::BufferSize::Default,
+        let default_channels = device
+            .default_input_config()
+            .map(|c| c.channels())
+            .unwrap_or(1);
+
+        let channels_to_try: Vec<u16> = if default_channels > 1 {
+            vec![default_channels, 1]
+        } else {
+            vec![1, 2]
         };
 
-        let err_callback = |err| eprintln!("Audio capture stream error: {}", err);
+        let mut last_error = String::new();
+        let mut active_stream: Option<cpal::Stream> = None;
 
-        let is_cap_i16 = is_capturing.clone();
-        let prod_i16 = Arc::clone(&producer);
+        for ch in channels_to_try {
+            let config = cpal::StreamConfig {
+                channels: ch,
+                sample_rate: cpal::SampleRate(sample_rate),
+                buffer_size: cpal::BufferSize::Default,
+            };
 
-        let stream = device
-            .build_input_stream(
-                &config,
-                move |data: &[i16], _: &cpal::InputCallbackInfo| {
-                    if is_cap_i16.load(Ordering::Relaxed) {
-                        if let Ok(mut prod) = prod_i16.lock() {
-                            prod.push_slice(data);
-                        }
-                    }
-                },
-                err_callback,
-                None,
-            )
-            .or_else(|_| {
-                let is_cap_f32 = is_capturing.clone();
-                let prod_f32 = Arc::clone(&producer);
-                device.build_input_stream(
-                    &config,
-                    move |data: &[f32], _: &cpal::InputCallbackInfo| {
-                        if is_cap_f32.load(Ordering::Relaxed) {
-                            if let Ok(mut prod) = prod_f32.lock() {
-                                for &sample in data {
-                                    let s16 = (sample.clamp(-1.0, 1.0) * 32767.0) as i16;
-                                    let _ = prod.push(s16);
+            let err_callback = |err| eprintln!("Audio capture stream error: {}", err);
+            let is_cap = is_capturing.clone();
+            let prod = Arc::clone(&producer);
+
+            let stream_res = if ch == 1 {
+                // Direct mono capture
+                let is_cap_mono = is_cap.clone();
+                let prod_mono = Arc::clone(&prod);
+                device
+                    .build_input_stream(
+                        &config,
+                        move |data: &[i16], _: &cpal::InputCallbackInfo| {
+                            if is_cap_mono.load(Ordering::Relaxed) {
+                                if let Ok(mut p) = prod_mono.lock() {
+                                    p.push_slice(data);
                                 }
                             }
-                        }
-                    },
-                    err_callback,
-                    None,
-                )
-            })
-            .map_err(|e| format!("Failed to create audio input stream: {}", e))?;
+                        },
+                        err_callback,
+                        None,
+                    )
+                    .or_else(|_| {
+                        let is_cap_f32 = is_cap.clone();
+                        let prod_f32 = Arc::clone(&prod);
+                        device.build_input_stream(
+                            &config,
+                            move |data: &[f32], _: &cpal::InputCallbackInfo| {
+                                if is_cap_f32.load(Ordering::Relaxed) {
+                                    if let Ok(mut p) = prod_f32.lock() {
+                                        for &sample in data {
+                                            let s16 = (sample.clamp(-1.0, 1.0) * 32767.0) as i16;
+                                            let _ = p.push(s16);
+                                        }
+                                    }
+                                }
+                            },
+                            err_callback,
+                            None,
+                        )
+                    })
+            } else {
+                // Stereo / multichannel downmix to mono: (left + right) / 2
+                let ch_usize = ch as usize;
+                let is_cap_stereo = is_cap.clone();
+                let prod_stereo = Arc::clone(&prod);
+                device
+                    .build_input_stream(
+                        &config,
+                        move |data: &[i16], _: &cpal::InputCallbackInfo| {
+                            if is_cap_stereo.load(Ordering::Relaxed) {
+                                if let Ok(mut p) = prod_stereo.lock() {
+                                    for frame in data.chunks_exact(ch_usize) {
+                                        let sum: i32 = frame.iter().map(|&s| s as i32).sum();
+                                        let mono = (sum / ch as i32) as i16;
+                                        let _ = p.push(mono);
+                                    }
+                                }
+                            }
+                        },
+                        err_callback,
+                        None,
+                    )
+                    .or_else(|_| {
+                        let is_cap_f32 = is_cap.clone();
+                        let prod_f32 = Arc::clone(&prod);
+                        device.build_input_stream(
+                            &config,
+                            move |data: &[f32], _: &cpal::InputCallbackInfo| {
+                                if is_cap_f32.load(Ordering::Relaxed) {
+                                    if let Ok(mut p) = prod_f32.lock() {
+                                        for frame in data.chunks_exact(ch_usize) {
+                                            let sum: f32 = frame.iter().copied().sum();
+                                            let mono_f32 = sum / ch as f32;
+                                            let s16 = (mono_f32.clamp(-1.0, 1.0) * 32767.0) as i16;
+                                            let _ = p.push(s16);
+                                        }
+                                    }
+                                }
+                            },
+                            err_callback,
+                            None,
+                        )
+                    })
+            };
 
-        stream
-            .play()
-            .map_err(|e| format!("Failed to start audio input stream: {}", e))?;
+            match stream_res {
+                Ok(stream) => {
+                    if let Err(e) = stream.play() {
+                        last_error = format!("Failed to play capture stream (channels={}): {}", ch, e);
+                        continue;
+                    }
+                    active_stream = Some(stream);
+                    break;
+                }
+                Err(e) => {
+                    last_error = format!("Failed to build capture stream (channels={}): {}", ch, e);
+                }
+            }
+        }
+
+        let stream = active_stream.ok_or_else(|| {
+            format!("Failed to initialize audio capture device: {}", last_error)
+        })?;
 
         Ok(Self {
             sample_rate,
@@ -99,37 +176,37 @@ impl AudioCapture {
     }
 
     /// Pushes PCM samples into the mock capture buffer.
+    /// Only accepts samples if capturing is actively enabled.
     pub fn push_mock_samples(&mut self, samples: &[i16]) {
+        if !self.is_capturing() {
+            return;
+        }
         if let Some(ref mut prod) = self.mock_producer {
             prod.push_slice(samples);
         }
     }
 
-    /// Reads up to `buf.len()` captured samples from the ring buffer into `buf`.
+    /// Reads up to `buf.len()` captured samples from the ring buffer into `buf` using batch popping.
     /// Returns the number of samples copied.
     pub fn read_samples(&mut self, buf: &mut [i16]) -> usize {
         if let Some(ref mut cons) = self.consumer {
-            let mut count = 0;
-            for slot in buf.iter_mut() {
-                if let Some(s) = cons.pop() {
-                    *slot = s;
-                    count += 1;
-                } else {
-                    break;
-                }
-            }
-            count
+            cons.pop_slice(buf)
         } else {
             0
         }
     }
 
-    /// Reads all currently available samples from the ring buffer.
+    /// Reads all currently available samples from the ring buffer in batches.
     pub fn read_all_samples(&mut self) -> Vec<i16> {
         let mut out = Vec::new();
         if let Some(ref mut cons) = self.consumer {
-            while let Some(s) = cons.pop() {
-                out.push(s);
+            let mut temp = [0i16; 512];
+            loop {
+                let n = cons.pop_slice(&mut temp);
+                if n == 0 {
+                    break;
+                }
+                out.extend_from_slice(&temp[..n]);
             }
         }
         out

@@ -184,14 +184,26 @@ fn test_audio_capture_mock_and_ringbuf() {
     let test_pcm = vec![1000i16, 2000, 3000, -1000, -2000, -3000];
     capture.push_mock_samples(&test_pcm);
 
+    // Test batch popping via pop_slice in read_samples
     let mut read_buf = vec![0i16; 10];
     let n = capture.read_samples(&mut read_buf);
     assert_eq!(n, 6);
     assert_eq!(&read_buf[..6], &test_pcm[..]);
 
+    // Test read_all_samples batch read
+    capture.push_mock_samples(&[111, 222, 333]);
+    let all = capture.read_all_samples();
+    assert_eq!(all, vec![111, 222, 333]);
+
     // Stopping capture
     capture.stop();
     assert!(!capture.is_capturing());
+
+    // Verify push_mock_samples respects is_capturing (no samples added when stopped)
+    capture.push_mock_samples(&[999i16, 888]);
+    let mut empty_buf = vec![0i16; 10];
+    let n2 = capture.read_samples(&mut empty_buf);
+    assert_eq!(n2, 0, "No samples should be captured when capture is stopped");
 }
 
 #[test]
@@ -218,4 +230,22 @@ fn test_audio_playback_mock_lifecycle() {
         assert!(s.is_finite());
         assert!(!s.is_nan());
     }
+}
+
+#[test]
+fn test_audio_playback_ring_buffer_overflow_warning() {
+    // Create playback with a tiny 100-sample bounded ring buffer
+    let (mut playback, mut consumer) = AudioPlayback::new_mock_with_buffer(24000, 100);
+
+    // Squelch open produces 600 samples, which exceeds the 100-sample ring buffer
+    // This triggers the warning and safely drops excess samples without panic
+    playback.start_transmission();
+
+    // Verify the consumer has captured up to the buffer capacity
+    let mut drained = Vec::new();
+    while let Some(s) = consumer.pop() {
+        drained.push(s);
+    }
+    assert!(drained.len() <= 100);
+    assert!(!drained.is_empty());
 }
