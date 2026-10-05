@@ -60,7 +60,7 @@ impl AircraftSnapshot {
             }
             IDX_AUDIO_COM_SELECTION => {
                 let radio = value.round() as i32;
-                self.active_radio = if radio == 2 { 2 } else { 1 };
+                self.active_radio = if radio == 2 || radio == 7 { 2 } else { 1 };
             }
             IDX_LATITUDE => {
                 self.lat = value as f64;
@@ -124,7 +124,7 @@ impl AircraftSnapshot {
 
 /// Normalizes floating point frequency values from various X-Plane datarefs to integer Hz
 fn parse_frequency_val(val: f32) -> i32 {
-    if val > 1_000_000.0 {
+    let raw = if val > 1_000_000.0 {
         // e.g. 118200000.0 (Hz)
         val.round() as i32
     } else if val > 100_000.0 {
@@ -138,6 +138,26 @@ fn parse_frequency_val(val: f32) -> i32 {
         (val * 1_000_000.0).round() as i32
     } else {
         val.round() as i32
+    };
+
+    // Tolerance adjustment for floating-point jitter around standard channel intervals (25 kHz and 8.33 kHz):
+    let rem_25k = raw % 25_000;
+    if rem_25k.abs() <= 50 {
+        raw - rem_25k
+    } else if rem_25k >= 24_950 {
+        raw + (25_000 - rem_25k)
+    } else if rem_25k <= -24_950 {
+        raw - (25_000 + rem_25k)
+    } else {
+        // Also check 5 kHz channel raster (e.g. 8.33 kHz named channels like 118.005 -> 118005000)
+        let rem_5k = raw % 5_000;
+        if rem_5k.abs() <= 50 {
+            raw - rem_5k
+        } else if rem_5k >= 4_950 {
+            raw + (5_000 - rem_5k)
+        } else {
+            raw
+        }
     }
 }
 
@@ -216,12 +236,14 @@ impl XPlaneUdpManager {
         let socket_send = Arc::clone(&socket);
         let mut shutdown_rx_keepalive = self.shutdown_tx.subscribe();
 
-        // Background keepalive task: resend subscriptions every 5 seconds
+        // Background keepalive task: resend subscriptions and mute command every 5 seconds
         let keepalive_task = tokio::spawn(async move {
             let mut interval = tokio::time::interval(Duration::from_secs(5));
+            interval.tick().await; // Consume initial immediate tick to prevent duplicate burst
             loop {
                 tokio::select! {
                     _ = interval.tick() => {
+                        let _ = send_atc_mute(&socket_send, target).await;
                         let _ = send_all_subscriptions(&socket_send, target, 10).await;
                     }
                     _ = shutdown_rx_keepalive.recv() => {
@@ -241,7 +263,11 @@ impl XPlaneUdpManager {
                         Ok((len, _from)) => {
                             let records = parse_rref_payload(&buf[..len]);
                             if !records.is_empty() {
-                                self.is_connected.store(true, Ordering::Relaxed);
+                                let was_connected = self.is_connected.swap(true, Ordering::Relaxed);
+                                if !was_connected {
+                                    // Send mute command immediately when simulator telemetry stream connects
+                                    let _ = send_atc_mute(&socket, target).await;
+                                }
                                 let mut snap = self.snapshot.write().await;
                                 snap.apply_records(&records);
                             }

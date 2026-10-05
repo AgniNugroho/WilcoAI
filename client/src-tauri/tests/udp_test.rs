@@ -174,6 +174,58 @@ fn test_aircraft_snapshot_serde_json() {
     assert_eq!(deserialized.squawk, 5201);
 }
 
+#[test]
+fn test_audio_com_selection_mappings() {
+    let mut snapshot = AircraftSnapshot::default();
+
+    // COM1 values (1 or standard X-Plane 6)
+    snapshot.update_field(IDX_AUDIO_COM_SELECTION, 1.0);
+    assert_eq!(snapshot.active_radio, 1);
+    assert_eq!(snapshot.active_radio_name(), "COM1");
+
+    snapshot.update_field(IDX_AUDIO_COM_SELECTION, 6.0);
+    assert_eq!(snapshot.active_radio, 1);
+    assert_eq!(snapshot.active_radio_name(), "COM1");
+
+    // COM2 values (2 or standard X-Plane 7)
+    snapshot.update_field(IDX_AUDIO_COM_SELECTION, 2.0);
+    assert_eq!(snapshot.active_radio, 2);
+    assert_eq!(snapshot.active_radio_name(), "COM2");
+
+    snapshot.update_field(IDX_AUDIO_COM_SELECTION, 7.0);
+    assert_eq!(snapshot.active_radio, 2);
+    assert_eq!(snapshot.active_radio_name(), "COM2");
+}
+
+#[test]
+fn test_frequency_rounding_and_raster_tolerance() {
+    let mut snapshot = AircraftSnapshot::default();
+
+    // Exact 25 kHz channel in Hz
+    snapshot.update_field(IDX_COM1_FREQ, 118200000.0);
+    assert_eq!(snapshot.com1_hz, 118200000);
+
+    // Float32 jitter (+8 Hz) snapped to 25 kHz channel
+    snapshot.update_field(IDX_COM1_FREQ, 118200008.0);
+    assert_eq!(snapshot.com1_hz, 118200000);
+
+    // Float32 jitter (-8 Hz) snapped to 25 kHz channel
+    snapshot.update_field(IDX_COM1_FREQ, 118199992.0);
+    assert_eq!(snapshot.com1_hz, 118200000);
+
+    // kHz format (121.650 MHz = 121650 kHz)
+    snapshot.update_field(IDX_COM2_FREQ, 121650.0);
+    assert_eq!(snapshot.com2_hz, 121650000);
+
+    // MHz format (118.2 MHz)
+    snapshot.update_field(IDX_COM1_FREQ, 118.2);
+    assert_eq!(snapshot.com1_hz, 118200000);
+
+    // 8.33 kHz named channel (118.005)
+    snapshot.update_field(IDX_COM1_FREQ, 118.005);
+    assert_eq!(snapshot.com1_hz, 118005000);
+}
+
 #[tokio::test]
 async fn test_xplane_udp_manager_mock_lifecycle() {
     use std::sync::Arc;
