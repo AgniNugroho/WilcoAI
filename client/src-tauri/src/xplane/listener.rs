@@ -34,16 +34,16 @@ impl Default for AircraftSnapshot {
             com1_hz: 118_200_000,
             com2_hz: 121_650_000,
             active_radio: 1,
-            lat: 0.0,
-            lon: 0.0,
-            elevation_m: 0.0,
+            lat: -7.9042,
+            lon: 110.0528,
+            elevation_m: 7.3,
             agl_m: 0.0,
             on_ground: true,
             squawk: 1200,
-            qnh_inhg: 29.92,
+            qnh_inhg: 29.85,
             groundspeed_ms: 0.0,
-            wind_speed: 0.0,
-            wind_dir: 0.0,
+            wind_speed: 7.0,
+            wind_dir: 100.0,
         }
     }
 }
@@ -190,7 +190,7 @@ impl XPlaneUdpManager {
 
     /// Creates a manager configured for standard local X-Plane 12 port 49000
     pub fn default_local() -> Result<Self, std::io::Error> {
-        Self::new("0.0.0.0:0", "127.0.0.1:49000")
+        Self::new("0.0.0.0:49001", "127.0.0.1:49000")
     }
 
     /// Returns the thread-safe reference handle to the aircraft snapshot
@@ -224,7 +224,13 @@ impl XPlaneUdpManager {
 
     /// Runs the core UDP socket loop: keepalive subscriptions and packet ingestion
     pub async fn run_loop(&self) -> Result<(), std::io::Error> {
-        let socket = Arc::new(UdpSocket::bind(&self.bind_addr).await?);
+        let socket = match UdpSocket::bind(&self.bind_addr).await {
+            Ok(s) => Arc::new(s),
+            Err(e) => {
+                eprintln!("[XPlaneUdpManager] Failed to bind to {}, falling back to ephemeral port: {e}", self.bind_addr);
+                Arc::new(UdpSocket::bind("0.0.0.0:0").await?)
+            }
+        };
         let target = self.target_addr;
 
         // 1. Mute default X-Plane ATC speech volume
@@ -236,9 +242,9 @@ impl XPlaneUdpManager {
         let socket_send = Arc::clone(&socket);
         let mut shutdown_rx_keepalive = self.shutdown_tx.subscribe();
 
-        // Background keepalive task: resend subscriptions and mute command every 5 seconds
-        let keepalive_task = tokio::spawn(async move {
-            let mut interval = tokio::time::interval(Duration::from_secs(5));
+        // Background keepalive task: resend subscriptions and mute command every 2 seconds
+        let keepalive_task = tauri::async_runtime::spawn(async move {
+            let mut interval = tokio::time::interval(Duration::from_secs(2));
             interval.tick().await; // Consume initial immediate tick to prevent duplicate burst
             loop {
                 tokio::select! {

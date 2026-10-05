@@ -12,22 +12,30 @@ interface RadioPanelProps {
 function getFacilityInfo(freqHz: number): { code: string; name: string; type: string; color: string } {
   const mhz = (freqHz / 1_000_000).toFixed(3);
   switch (mhz) {
+    case '121.650':
+      return { code: 'WAHI GND', name: 'Yogyakarta Ground', type: 'GND', color: 'bg-amber-500/20 text-amber-400 border-amber-500/40' };
     case '118.200':
-      return { code: 'KSEA TWR', name: 'Seattle Tower', type: 'TWR', color: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/40' };
-    case '121.700':
-    case '121.900':
-      return { code: 'KSEA GND', name: 'Seattle Ground', type: 'GND', color: 'bg-amber-500/20 text-amber-400 border-amber-500/40' };
-    case '119.200':
-    case '120.400':
-      return { code: 'KSEA APP', name: 'Seattle Approach', type: 'APP', color: 'bg-sky-500/20 text-sky-400 border-sky-500/40' };
-    case '128.000':
-      return { code: 'KSEA DEP', name: 'Seattle Departure', type: 'DEP', color: 'bg-cyan-500/20 text-cyan-400 border-cyan-500/40' };
-    case '118.000':
-      return { code: 'KSEA ATIS', name: 'Automatic Terminal Info', type: 'ATIS', color: 'bg-purple-500/20 text-purple-400 border-purple-500/40' };
+      return { code: 'WAHI TWR', name: 'Yogyakarta Tower', type: 'TWR', color: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/40' };
+    case '127.800':
+      return { code: 'WAHI ATIS', name: 'Yogyakarta ATIS', type: 'ATIS', color: 'bg-purple-500/20 text-purple-400 border-purple-500/40' };
+    case '122.400':
+      return { code: 'WAHI APP', name: 'Yogyakarta Radar', type: 'APP', color: 'bg-sky-500/20 text-sky-400 border-sky-500/40' };
+    case '120.300':
+      return { code: 'WAHH TWR', name: 'Adisutjipto Tower', type: 'TWR', color: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/40' };
+    case '118.600':
+      return { code: 'WAHH ATIS', name: 'Adisutjipto ATIS', type: 'ATIS', color: 'bg-purple-500/20 text-purple-400 border-purple-500/40' };
     case '121.500':
       return { code: 'GUARD', name: 'Emergency Calling', type: 'EMG', color: 'bg-rose-500/20 text-rose-400 border-rose-500/40' };
     case '122.800':
       return { code: 'UNICOM', name: 'Common Traffic Advisory', type: 'CTAF', color: 'bg-indigo-500/20 text-indigo-400 border-indigo-500/40' };
+    case '121.700':
+    case '121.900':
+      return { code: 'GND', name: 'Airport Ground', type: 'GND', color: 'bg-amber-500/20 text-amber-400 border-amber-500/40' };
+    case '119.200':
+    case '120.400':
+      return { code: 'APP', name: 'Approach Control', type: 'APP', color: 'bg-sky-500/20 text-sky-400 border-sky-500/40' };
+    case '128.000':
+      return { code: 'DEP', name: 'Departure Control', type: 'DEP', color: 'bg-cyan-500/20 text-cyan-400 border-cyan-500/40' };
     default:
       return { code: 'VHF COMM', name: 'Aviation Air-Ground', type: 'COM', color: 'bg-slate-700/40 text-slate-300 border-slate-600/40' };
   }

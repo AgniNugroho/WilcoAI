@@ -77,7 +77,9 @@ fn main() {
 
                     // 1. Telemetry update
                     let snapshot = xp_mgr.get_snapshot().await;
+                    let is_sim_connected = xp_mgr.is_connected();
                     let _ = handle_telemetry.emit("telemetry_update", &snapshot);
+                    let _ = handle_telemetry.emit("sim_connected_update", &is_sim_connected);
 
                     // 2. Audio level update
                     let is_transmitting = ptt_mgr.state().is_transmitting();
@@ -112,6 +114,7 @@ fn main() {
             commands::get_session_info,
             commands::trigger_ptt_press,
             commands::trigger_ptt_release,
+            commands::is_sim_connected,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

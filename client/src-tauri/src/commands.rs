@@ -98,6 +98,10 @@ impl AppState {
         self.xplane_manager.get_snapshot().await
     }
 
+    pub fn is_sim_connected(&self) -> bool {
+        self.xplane_manager.is_connected()
+    }
+
     pub async fn set_callsign(&self, callsign: String, aircraft_type: String) -> SessionInfo {
         let mut session = self.session_info.write().await;
         session.callsign = callsign.trim().to_uppercase();
@@ -256,4 +260,9 @@ pub fn trigger_ptt_release(
     state: tauri::State<'_, AppState>,
 ) -> Result<bool, String> {
     Ok(state.trigger_ptt_release(radio))
+}
+
+#[tauri::command]
+pub fn is_sim_connected(state: tauri::State<'_, AppState>) -> Result<bool, String> {
+    Ok(state.is_sim_connected())
 }

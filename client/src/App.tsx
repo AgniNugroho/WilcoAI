@@ -28,21 +28,21 @@ import {
   TranscriptEntry,
 } from './types';
 
-// Default initial telemetry snapshot
+// Default initial telemetry snapshot (WAHI Yogyakarta International)
 const DEFAULT_SNAPSHOT: AircraftSnapshot = {
   com1_hz: 118_200_000,
   com2_hz: 121_650_000,
   active_radio: 1,
-  lat: 47.4502,
-  lon: -122.3088,
-  elevation_m: 132.0,
+  lat: -7.9042,
+  lon: 110.0528,
+  elevation_m: 7.3,
   agl_m: 0.0,
   on_ground: true,
-  squawk: 1200,
-  qnh_inhg: 29.92,
+  squawk: 5201,
+  qnh_inhg: 29.85,
   groundspeed_ms: 0.0,
-  wind_speed: 8.0,
-  wind_dir: 240.0,
+  wind_speed: 7.0,
+  wind_dir: 100.0,
 };
 
 const DEFAULT_PTT_CONFIG: PttConfigType = {
@@ -67,34 +67,34 @@ const DEFAULT_DSP_SETTINGS: DspSettings = {
 const INITIAL_TRANSCRIPT: TranscriptEntry[] = [
   {
     id: 'tx-1',
-    timestamp: '18:24:10',
+    timestamp: '07:00:00',
     speaker: 'ATIS',
     radio: 'COM1',
-    text: 'Seattle-Tacoma information Bravo. 1820Z. Wind 240 at 8 knots. Visibility 10 miles. Sky clear. Temperature 18, dewpoint 11. Altimeter 29.92. Arriving and departing runways 16L, 16C.',
+    text: 'Yogyakarta International Information Alpha. 0700Z. Wind 100 at 07 knots. Visibility 10 kilometers. Few clouds at 2000 feet. Temperature 29, dewpoint 24. QNH 1011 hectopascals. Departing runway 11.',
     clearanceType: 'WEATHER',
   },
   {
     id: 'tx-2',
-    timestamp: '18:25:30',
+    timestamp: '07:02:15',
     speaker: 'Pilot',
     radio: 'COM1',
-    text: 'Seattle Tower, Skyhawk 172SP ready for departure runway 16L, VFR south.',
+    text: 'Yogyakarta Ground, Indonesia 123, stand 4, request IFR clearance to Jakarta Halim.',
   },
   {
     id: 'tx-3',
-    timestamp: '18:25:38',
+    timestamp: '07:02:28',
     speaker: 'ATC',
     radio: 'COM1',
-    text: 'Skyhawk 172SP, Seattle Tower, runway 16L cleared for takeoff, wind 240 at 8, fly runway heading.',
-    clearanceType: 'TAKEOFF',
+    text: 'Indonesia 123, Yogyakarta Ground, cleared to Halim via SOVI1A departure, runway 11, climb to flight level 100, squawk 5201.',
+    clearanceType: 'CLEARANCE',
   },
 ];
 
 export default function App() {
   const [snapshot, setSnapshot] = useState<AircraftSnapshot>(DEFAULT_SNAPSHOT);
   const [session, setSession] = useState<SessionInfo>({
-    callsign: 'N172SP',
-    aircraft_type: 'C172',
+    callsign: 'GIA123',
+    aircraft_type: 'B738',
   });
   const [pttConfig, setPttConfig] = useState<PttConfigType>(DEFAULT_PTT_CONFIG);
   const [dspSettings, setDspSettings] = useState<DspSettings>(DEFAULT_DSP_SETTINGS);
@@ -125,6 +125,7 @@ export default function App() {
   // Load initial backend state and wire event listeners
   useEffect(() => {
     let unlistenTelemetry: UnlistenFn | undefined;
+    let unlistenSimConnected: UnlistenFn | undefined;
     let unlistenAudio: UnlistenFn | undefined;
     let unlistenPtt: UnlistenFn | undefined;
     let unlistenTranscript: UnlistenFn | undefined;
@@ -139,9 +140,15 @@ export default function App() {
       try {
         const snap = await invoke<AircraftSnapshot>('get_aircraft_state');
         setSnapshot(snap);
-        setIsSimConnected(snap.lat !== 0 || snap.lon !== 0 || snap.agl_m > 0);
       } catch (err) {
         console.warn('Initial aircraft state error:', err);
+      }
+
+      try {
+        const isConnected = await invoke<boolean>('is_sim_connected');
+        setIsSimConnected(isConnected);
+      } catch (err) {
+        console.warn('Initial sim connection error:', err);
       }
 
       try {
@@ -173,7 +180,11 @@ export default function App() {
       // 1. Telemetry event listener
       unlistenTelemetry = await listen<AircraftSnapshot>('telemetry_update', (event) => {
         setSnapshot(event.payload);
-        setIsSimConnected(true);
+      });
+
+      // Simulator connection status event listener
+      unlistenSimConnected = await listen<boolean>('sim_connected_update', (event) => {
+        setIsSimConnected(event.payload);
       });
 
       // 2. Audio level event listener
@@ -208,6 +219,7 @@ export default function App() {
 
     return () => {
       unlistenTelemetry?.();
+      unlistenSimConnected?.();
       unlistenAudio?.();
       unlistenPtt?.();
       unlistenTranscript?.();

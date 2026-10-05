@@ -308,6 +308,14 @@ class MockXPlaneSender:
         target_port: Optional[int] = None,
         rate_hz: float = 10.0,
     ):
+        if target_port and target_port == listen_port:
+            print(
+                f"[MockXPlane] WARNING: target_port ({target_port}) cannot be the same as listen_port ({listen_port})! "
+                f"Defaulting target_port to 49001 (companion app default) to prevent self-loop.",
+                file=sys.stderr,
+            )
+            target_port = 49001
+
         self.listen_host = listen_host
         self.listen_port = listen_port
         self.target_host = target_host
@@ -359,8 +367,9 @@ class MockXPlaneSender:
                 break
 
             packets_read += 1
-            if self.known_client_addr is None:
+            if self.known_client_addr != addr:
                 self.known_client_addr = addr
+                print(f"[MockXPlane] Linked to client at {addr[0]}:{addr[1]}")
 
             # Check DREF command
             dref_res = parse_dref_packet(data)
@@ -519,8 +528,8 @@ def main() -> None:
     parser.add_argument(
         "--target-port",
         type=int,
-        default=None,
-        help="Target client UDP port (optional; defaults to sender port)",
+        default=49001,
+        help="Target client UDP port (default: 49001, WilcoAI companion app listener)",
     )
     parser.add_argument(
         "--target-host",
