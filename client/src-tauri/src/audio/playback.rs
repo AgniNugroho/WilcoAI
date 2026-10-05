@@ -24,10 +24,6 @@ impl AudioPlayback {
             .default_output_device()
             .ok_or_else(|| "No default output audio device found".to_string())?;
 
-        let rb = HeapRb::<f32>::new(96000);
-        let (producer, consumer) = rb.split();
-        let consumer = Arc::new(Mutex::new(consumer));
-
         let default_channels = device
             .default_output_config()
             .map(|c| c.channels())
@@ -41,6 +37,7 @@ impl AudioPlayback {
 
         let mut last_error = String::new();
         let mut active_stream: Option<cpal::Stream> = None;
+        let mut active_producer: Option<HeapProducer<f32>> = None;
 
         for ch in channels_to_try {
             let config = cpal::StreamConfig {
@@ -50,18 +47,19 @@ impl AudioPlayback {
             };
 
             let err_callback = |err| eprintln!("Audio playback stream error: {}", err);
-            let cons = Arc::clone(&consumer);
             let ch_usize = ch as usize;
+
+            let rb = HeapRb::<f32>::new(96000);
+            let (producer, mut consumer) = rb.split();
 
             let stream_res = if ch == 1 {
                 // Direct mono playback
                 device.build_output_stream(
                     &config,
                     move |data: &mut [f32], _: &cpal::OutputCallbackInfo| {
-                        if let Ok(mut c) = cons.lock() {
-                            for sample in data.iter_mut() {
-                                *sample = c.pop().unwrap_or(0.0);
-                            }
+                        let popped = consumer.pop_slice(data);
+                        for i in popped..data.len() {
+                            data[i] = 0.0;
                         }
                     },
                     err_callback,
@@ -69,15 +67,19 @@ impl AudioPlayback {
                 )
             } else {
                 // Stereo / multichannel playback: duplicate mono ATC speech to all channels
+                let mut temp_buf = vec![0.0; 4096];
                 device.build_output_stream(
                     &config,
                     move |data: &mut [f32], _: &cpal::OutputCallbackInfo| {
-                        if let Ok(mut c) = cons.lock() {
-                            for frame in data.chunks_exact_mut(ch_usize) {
-                                let sample = c.pop().unwrap_or(0.0);
-                                for out in frame.iter_mut() {
-                                    *out = sample;
-                                }
+                        let frames = data.len() / ch_usize;
+                        if temp_buf.len() < frames {
+                            temp_buf.resize(frames, 0.0);
+                        }
+                        let popped = consumer.pop_slice(&mut temp_buf[..frames]);
+                        for (i, frame) in data.chunks_exact_mut(ch_usize).enumerate() {
+                            let sample = if i < popped { temp_buf[i] } else { 0.0 };
+                            for out in frame.iter_mut() {
+                                *out = sample;
                             }
                         }
                     },
@@ -93,6 +95,7 @@ impl AudioPlayback {
                         continue;
                     }
                     active_stream = Some(stream);
+                    active_producer = Some(producer);
                     break;
                 }
                 Err(e) => {
@@ -110,7 +113,7 @@ impl AudioPlayback {
             filter: VhfDspFilter::new(sample_rate),
             is_transmitting: false,
             mock_sink: None,
-            producer: Some(producer),
+            producer: active_producer,
             _stream: Some(stream),
         })
     }

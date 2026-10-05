@@ -258,9 +258,9 @@ impl XPlaneUdpManager {
 
         loop {
             tokio::select! {
-                res = socket.recv_from(&mut buf) => {
+                res = tokio::time::timeout(Duration::from_secs(3), socket.recv_from(&mut buf)) => {
                     match res {
-                        Ok((len, _from)) => {
+                        Ok(Ok((len, _from))) => {
                             let records = parse_rref_payload(&buf[..len]);
                             if !records.is_empty() {
                                 let was_connected = self.is_connected.swap(true, Ordering::Relaxed);
@@ -272,8 +272,11 @@ impl XPlaneUdpManager {
                                 snap.apply_records(&records);
                             }
                         }
-                        Err(e) => {
+                        Ok(Err(e)) => {
                             eprintln!("[XPlaneUdpManager] recv error: {e}");
+                        }
+                        Err(_) => {
+                            self.is_connected.store(false, Ordering::Relaxed);
                         }
                     }
                 }

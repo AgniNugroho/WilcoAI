@@ -175,11 +175,6 @@ async def websocket_atc(
             return
 
         if not is_frequency_valid:
-            await websocket.send_json({
-                "type": "status",
-                "action": "DEAD_AIR",
-                "message": "Audio discarded: unmonitored frequency",
-            })
             return
 
         prompt = build_system_prompt(flight_session, airport, atis_state)
