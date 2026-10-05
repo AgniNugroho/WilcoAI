@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Gamepad2, Keyboard, Mouse, X, AlertCircle, Check, Sliders, RefreshCw } from 'lucide-react';
 import { PttBinding, PttConfig as PttConfigType, RadioType } from '../types';
 
@@ -21,6 +21,7 @@ export const PttConfig: React.FC<PttConfigProps> = ({
 }) => {
   const [learningRadio, setLearningRadio] = useState<RadioType | null>(null);
   const [activeTab, setActiveTab] = useState<RadioType>('Com1');
+  const initialBindingRef = useRef<string | null>(null);
 
   // Human readable description of a binding
   const formatBindingText = (binding: PttBinding): string => {
@@ -45,18 +46,16 @@ export const PttConfig: React.FC<PttConfigProps> = ({
     return parts.length > 0 ? parts.join(' | ') : 'No binding assigned';
   };
 
-  // Automatically exit learning state when incoming config updates from hardware capture
+  // Automatically exit learning state when incoming config changes compared to initial snapshot
   useEffect(() => {
-    if (!learningRadio) return;
-    const targetBinding = learningRadio === 'Com1' ? config.com1 : config.com2;
-    if (
-      (targetBinding.joystick_button !== null && targetBinding.joystick_button !== undefined) ||
-      (targetBinding.mouse_button !== null && targetBinding.mouse_button !== undefined) ||
-      Boolean(targetBinding.keyboard_key)
-    ) {
+    if (!learningRadio || !initialBindingRef.current) return;
+    const currentBindingStr = JSON.stringify(learningRadio === 'Com1' ? config.com1 : config.com2);
+    if (currentBindingStr !== initialBindingRef.current) {
+      initialBindingRef.current = null;
       setLearningRadio(null);
+      onStopLearning();
     }
-  }, [config, learningRadio]);
+  }, [config, learningRadio, onStopLearning]);
 
   // Keyboard capture during learning mode
   useEffect(() => {
@@ -68,6 +67,7 @@ export const PttConfig: React.FC<PttConfigProps> = ({
 
       const keyName = e.code === 'Space' ? 'Space' : e.code;
       const target = learningRadio;
+      initialBindingRef.current = null;
       setLearningRadio(null);
 
       await onSaveBinding(target, {
@@ -86,6 +86,7 @@ export const PttConfig: React.FC<PttConfigProps> = ({
 
         const mouseBtn = e.button === 1 ? 3 : e.button === 3 ? 4 : 5;
         const target = learningRadio;
+        initialBindingRef.current = null;
         setLearningRadio(null);
 
         await onSaveBinding(target, {
@@ -111,13 +112,24 @@ export const PttConfig: React.FC<PttConfigProps> = ({
   const currentBinding = activeTab === 'Com1' ? config.com1 : config.com2;
 
   const handleStartLearn = async (radio: RadioType) => {
+    initialBindingRef.current = JSON.stringify(radio === 'Com1' ? config.com1 : config.com2);
     setLearningRadio(radio);
     await onStartLearning(radio);
   };
 
   const handleCancelLearn = async () => {
+    initialBindingRef.current = null;
     setLearningRadio(null);
     await onStopLearning();
+  };
+
+  const handleClose = async () => {
+    if (learningRadio) {
+      initialBindingRef.current = null;
+      setLearningRadio(null);
+      await onStopLearning();
+    }
+    onClose();
   };
 
   const handleClear = async (radio: RadioType) => {
@@ -147,7 +159,7 @@ export const PttConfig: React.FC<PttConfigProps> = ({
             </div>
           </div>
           <button
-            onClick={onClose}
+            onClick={handleClose}
             className="p-2 rounded-lg text-slate-400 hover:text-slate-200 hover:bg-slate-800 transition-colors"
           >
             <X className="w-5 h-5" />
@@ -315,7 +327,7 @@ export const PttConfig: React.FC<PttConfigProps> = ({
         {/* Modal Footer */}
         <div className="p-4 bg-slate-950/80 border-t border-slate-800 flex justify-end">
           <button
-            onClick={onClose}
+            onClick={handleClose}
             className="py-2 px-5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-xs tracking-wider flex items-center gap-2 transition-colors"
           >
             <Check className="w-4 h-4 text-emerald-400" />
