@@ -26,12 +26,44 @@ fn main() {
             let ptt_mgr = handle.state::<AppState>().ptt_manager.clone();
             let xp_mgr = handle.state::<AppState>().xplane_manager.clone();
 
-            // Background task: forward PTT events to webview
+            // Background task: forward PTT events to webview with lag recovery
             let handle_ptt = handle.clone();
             let mut ptt_rx = ptt_mgr.subscribe();
             tokio::spawn(async move {
-                while let Ok(evt) = ptt_rx.recv().await {
-                    let _ = handle_ptt.emit("ptt_state_change", &evt);
+                loop {
+                    match ptt_rx.recv().await {
+                        Ok(evt) => {
+                            let _ = handle_ptt.emit("ptt_state_change", &evt);
+                        }
+                        Err(tokio::sync::broadcast::error::RecvError::Lagged(skipped)) => {
+                            eprintln!("Warning: PTT broadcast receiver lagged by {skipped} messages");
+                            continue;
+                        }
+                        Err(tokio::sync::broadcast::error::RecvError::Closed) => {
+                            break;
+                        }
+                    }
+                }
+            });
+
+            // Background task: monitor PTT learning mode and binding updates
+            let handle_config = handle.clone();
+            let ptt_mgr_cfg = ptt_mgr.clone();
+            tokio::spawn(async move {
+                let mut interval = tokio::time::interval(Duration::from_millis(50));
+                let mut last_cfg = ptt_mgr_cfg.get_config();
+                let mut was_learning = ptt_mgr_cfg.is_learning().is_some();
+
+                loop {
+                    interval.tick().await;
+                    let current_cfg = ptt_mgr_cfg.get_config();
+                    let is_learning = ptt_mgr_cfg.is_learning().is_some();
+
+                    if current_cfg != last_cfg || (was_learning && !is_learning) {
+                        last_cfg = current_cfg.clone();
+                        let _ = handle_config.emit("ptt_config_updated", &current_cfg);
+                    }
+                    was_learning = is_learning;
                 }
             });
 

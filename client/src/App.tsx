@@ -128,6 +128,7 @@ export default function App() {
     let unlistenAudio: UnlistenFn | undefined;
     let unlistenPtt: UnlistenFn | undefined;
     let unlistenTranscript: UnlistenFn | undefined;
+    let unlistenPttConfig: UnlistenFn | undefined;
 
     async function initTauri() {
       if (!tauriActive) {
@@ -196,6 +197,11 @@ export default function App() {
       unlistenTranscript = await listen<TranscriptEntry>('atc_transcript_update', (event) => {
         setTranscript((prev) => [...prev, event.payload]);
       });
+
+      // 5. PTT config update event listener (learning mode capture or background sync)
+      unlistenPttConfig = await listen<PttConfigType>('ptt_config_updated', (event) => {
+        setPttConfig(event.payload);
+      });
     }
 
     initTauri();
@@ -205,6 +211,7 @@ export default function App() {
       unlistenAudio?.();
       unlistenPtt?.();
       unlistenTranscript?.();
+      unlistenPttConfig?.();
     };
   }, [tauriActive]);
 

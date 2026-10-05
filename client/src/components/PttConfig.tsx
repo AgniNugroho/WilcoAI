@@ -45,6 +45,19 @@ export const PttConfig: React.FC<PttConfigProps> = ({
     return parts.length > 0 ? parts.join(' | ') : 'No binding assigned';
   };
 
+  // Automatically exit learning state when incoming config updates from hardware capture
+  useEffect(() => {
+    if (!learningRadio) return;
+    const targetBinding = learningRadio === 'Com1' ? config.com1 : config.com2;
+    if (
+      (targetBinding.joystick_button !== null && targetBinding.joystick_button !== undefined) ||
+      (targetBinding.mouse_button !== null && targetBinding.mouse_button !== undefined) ||
+      Boolean(targetBinding.keyboard_key)
+    ) {
+      setLearningRadio(null);
+    }
+  }, [config, learningRadio]);
+
   // Keyboard capture during learning mode
   useEffect(() => {
     if (!learningRadio) return;
