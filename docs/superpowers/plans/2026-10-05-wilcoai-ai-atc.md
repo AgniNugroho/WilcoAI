@@ -339,15 +339,15 @@
   - Interactive simulator harness sending simulated WAHI flight telemetry over UDP `49000`.
   - Comprehensive end-to-end verification script testing the complete chain.
 
-- [ ] **Step 1: Create `scripts/mock_xplane_sender.py`**
+- [x] **Step 1: Create `scripts/mock_xplane_sender.py`**
   Python script broadcasting X-Plane UDP datarefs simulating:
   - Aircraft at WAHI Ramp (COM1: 121.650 MHz WAHI Ground).
   - Weather: Wind 100@7 kts, QNH 1011 hPa, Temp 29 C.
   - Pushback, taxi to RW11 holding short, switch to Tower 118.200 MHz, takeoff run.
-- [ ] **Step 2: Run End-to-End integration test**
+- [x] **Step 2: Run End-to-End integration test**
   Run: `python scripts/mock_xplane_sender.py --scenario departure_wahi` and verify telemetry ingestion in companion app.
   Expected: Klien receives 10 Hz UDP packets, UI displays `WAHI GND (121.650 MHz)`, and native ATC volume mute command is dispatched.
-- [ ] **Step 3: Verify Audio & DSP loop**
+- [x] **Step 3: Verify Audio & DSP loop**
   Trigger PTT transmisi, verify audio streaming to Gateway `/ws/atc`, verify response playback with VHF DSP squelch click and bandpass.
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
   Run: `git add scripts tests; git commit -m "test: add mock X-Plane UDP harness and end-to-end verification tests"`
