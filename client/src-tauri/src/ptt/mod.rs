@@ -1,5 +1,6 @@
 pub mod hotkey;
 pub mod joystick;
+pub mod mouse;
 
 use std::fmt;
 use std::sync::{Arc, RwLock};
@@ -8,6 +9,7 @@ use tokio::sync::broadcast;
 
 pub use hotkey::{parse_hotkey, HotkeyListener};
 pub use joystick::JoystickListener;
+pub use mouse::MouseListener;
 
 /// Radio selection for Push-To-Talk transmission
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -81,6 +83,8 @@ pub struct PttBinding {
     pub joystick_button: Option<u32>,
     /// Global keyboard hotkey description (e.g. "Space", "KeyT", "Control+Space")
     pub keyboard_key: Option<String>,
+    /// Mouse button index (3 = Middle, 4 = Mouse 4/Thumb Back, 5 = Mouse 5/Thumb Forward)
+    pub mouse_button: Option<u8>,
 }
 
 impl PttBinding {
@@ -92,6 +96,7 @@ impl PttBinding {
         Self {
             joystick_button: Some(button),
             keyboard_key: None,
+            mouse_button: None,
         }
     }
 
@@ -99,6 +104,15 @@ impl PttBinding {
         Self {
             joystick_button: None,
             keyboard_key: Some(key.into()),
+            mouse_button: None,
+        }
+    }
+
+    pub fn from_mouse(button: u8) -> Self {
+        Self {
+            joystick_button: None,
+            keyboard_key: None,
+            mouse_button: Some(button),
         }
     }
 
@@ -112,6 +126,11 @@ impl PttBinding {
         self
     }
 
+    pub fn with_mouse(mut self, button: u8) -> Self {
+        self.mouse_button = Some(button);
+        self
+    }
+
     pub fn matches_joystick(&self, button: u32) -> bool {
         self.joystick_button == Some(button)
     }
@@ -120,8 +139,12 @@ impl PttBinding {
         self.keyboard_key.as_deref() == Some(key)
     }
 
+    pub fn matches_mouse(&self, button: u8) -> bool {
+        self.mouse_button == Some(button)
+    }
+
     pub fn is_empty(&self) -> bool {
-        self.joystick_button.is_none() && self.keyboard_key.is_none()
+        self.joystick_button.is_none() && self.keyboard_key.is_none() && self.mouse_button.is_none()
     }
 }
 
@@ -345,4 +368,44 @@ impl PttManager {
             self.trigger_release(RadioType::Com2);
         }
     }
+
+    /// Handles mouse button press event (e.g. 4 = Mouse 4/Thumb Back, 5 = Mouse 5/Thumb Forward, 3 = Middle)
+    pub fn handle_mouse_press(&self, button: u8) {
+        // If learning mode is active, atomically check-and-consume the learn target
+        if let Some(target) = self.learn_target.write().unwrap().take() {
+            let mut cfg = self.config.write().unwrap();
+            match target {
+                RadioType::Com1 => cfg.com1.mouse_button = Some(button),
+                RadioType::Com2 => cfg.com2.mouse_button = Some(button),
+            }
+            return;
+        }
+
+        // Otherwise check registered bindings
+        let cfg = self.config.read().unwrap();
+        if cfg.com1.matches_mouse(button) {
+            drop(cfg);
+            self.trigger_press(RadioType::Com1);
+        } else if cfg.com2.matches_mouse(button) {
+            drop(cfg);
+            self.trigger_press(RadioType::Com2);
+        }
+    }
+
+    /// Handles mouse button release event
+    pub fn handle_mouse_release(&self, button: u8) {
+        if self.is_learning().is_some() {
+            return;
+        }
+
+        let cfg = self.config.read().unwrap();
+        if cfg.com1.matches_mouse(button) {
+            drop(cfg);
+            self.trigger_release(RadioType::Com1);
+        } else if cfg.com2.matches_mouse(button) {
+            drop(cfg);
+            self.trigger_release(RadioType::Com2);
+        }
+    }
 }
+

@@ -1,6 +1,7 @@
 use wilco_client::ptt::{
     hotkey::HotkeyListener,
     joystick::JoystickListener,
+    mouse::MouseListener,
     PttBinding, PttConfig, PttEvent, PttManager, PttState, RadioType,
 };
 
@@ -171,6 +172,7 @@ fn test_ptt_types_serde_json() {
     let binding = PttBinding {
         joystick_button: Some(3),
         keyboard_key: Some("Space".into()),
+        mouse_button: Some(4),
     };
     let json = serde_json::to_string(&binding).expect("serialize binding");
     let deser: PttBinding = serde_json::from_str(&json).expect("deserialize binding");
@@ -267,4 +269,82 @@ fn test_learning_mode_atomic_single_consumer() {
     manager.handle_joystick_press(9);
     assert_eq!(manager.get_binding(RadioType::Com1).joystick_button, Some(5));
 }
+
+#[tokio::test]
+async fn test_mouse_press_and_release() {
+    let mut config = PttConfig::default();
+    config.com1 = PttBinding::from_mouse(4); // Mouse 4 (Thumb Back / XButton1)
+    config.com2 = PttBinding::from_mouse(5); // Mouse 5 (Thumb Forward / XButton2)
+
+    let manager = PttManager::with_config(config);
+    let mut rx = manager.subscribe();
+
+    // 1. Mouse 4 press -> COM1 transmitting
+    manager.handle_mouse_press(4);
+    assert_eq!(manager.state(), PttState::Transmitting(RadioType::Com1));
+    let ev1 = rx.recv().await.expect("recv mouse 4 press");
+    assert_eq!(ev1, PttEvent::Pressed { radio: RadioType::Com1 });
+
+    // 2. Mouse 4 release -> Idle
+    manager.handle_mouse_release(4);
+    assert_eq!(manager.state(), PttState::Idle);
+    let ev2 = rx.recv().await.expect("recv mouse 4 release");
+    assert_eq!(ev2, PttEvent::Released { radio: RadioType::Com1 });
+
+    // 3. Mouse 5 press -> COM2 transmitting
+    manager.handle_mouse_press(5);
+    assert_eq!(manager.state(), PttState::Transmitting(RadioType::Com2));
+    let ev3 = rx.recv().await.expect("recv mouse 5 press");
+    assert_eq!(ev3, PttEvent::Pressed { radio: RadioType::Com2 });
+
+    // 4. Mouse 5 release -> Idle
+    manager.handle_mouse_release(5);
+    assert_eq!(manager.state(), PttState::Idle);
+    let ev4 = rx.recv().await.expect("recv mouse 5 release");
+    assert_eq!(ev4, PttEvent::Released { radio: RadioType::Com2 });
+}
+
+#[tokio::test]
+async fn test_learning_mode_mouse() {
+    let manager = PttManager::new();
+    let mut rx = manager.subscribe();
+
+    assert_eq!(manager.is_learning(), None);
+    assert_eq!(manager.get_binding(RadioType::Com1).mouse_button, None);
+
+    // Enter learn mode for COM1
+    manager.start_learn_mode(RadioType::Com1);
+    assert_eq!(manager.is_learning(), Some(RadioType::Com1));
+
+    // Simulate mouse thumb button 4 (XBUTTON1) press
+    manager.handle_mouse_press(4);
+
+    // Learn mode completed and stored the binding
+    assert_eq!(manager.is_learning(), None);
+    assert_eq!(manager.get_binding(RadioType::Com1).mouse_button, Some(4));
+    assert_eq!(manager.state(), PttState::Idle);
+    assert!(rx.try_recv().is_err());
+
+    // Subsequent press on learned mouse button 4 keys COM1
+    manager.handle_mouse_press(4);
+    assert_eq!(manager.state(), PttState::Transmitting(RadioType::Com1));
+    let event = rx.recv().await.unwrap();
+    assert_eq!(event, PttEvent::Pressed { radio: RadioType::Com1 });
+
+    // Release mouse button 4 unkeys COM1
+    manager.handle_mouse_release(4);
+    assert_eq!(manager.state(), PttState::Idle);
+    let event = rx.recv().await.unwrap();
+    assert_eq!(event, PttEvent::Released { radio: RadioType::Com1 });
+}
+
+#[test]
+fn test_mouse_listener_instantiation_mock() {
+    let manager = PttManager::new();
+
+    let mut mouse = MouseListener::new(manager.clone());
+    assert!(!mouse.is_running());
+    mouse.stop();
+}
+
 
