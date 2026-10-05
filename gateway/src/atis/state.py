@@ -48,6 +48,8 @@ class PhoneticLetter(str):
     Provides dual equality matching against both phonetic word ('ALPHA')
     and single character code ('A').
     """
+    _phonetic: str
+    _code: str
 
     def __new__(cls, phonetic: str, code: str) -> PhoneticLetter:
         instance = super().__new__(cls, phonetic.upper())
@@ -83,7 +85,7 @@ def to_phonetic_letter(val: Union[str, PhoneticLetter]) -> PhoneticLetter:
     if isinstance(val, PhoneticLetter):
         return val
 
-    clean = str(val).strip().upper()
+    clean = val.strip().upper()
     if len(clean) == 1 and clean in PHONETIC_ALPHABET:
         return PhoneticLetter(PHONETIC_ALPHABET[clean], clean)
 
@@ -138,7 +140,7 @@ class AtisState:
             self.letter = to_phonetic_letter(self.letter)
         if self.weather is not None:
             if not self.zulu_sec:
-                self.zulu_sec = int(self.weather.zulu_sec)
+                self.zulu_sec = self.weather.zulu_sec
             if self.qnh_hpa == 1013.25:
                 self.qnh_hpa = float(self.weather.qnh_hpa)
 
@@ -146,13 +148,13 @@ class AtisState:
     def phonetic_letter(self) -> str:
         if isinstance(self.letter, PhoneticLetter):
             return self.letter.phonetic
-        return str(self.letter)
+        return self.letter
 
     @property
     def letter_code(self) -> str:
         if isinstance(self.letter, PhoneticLetter):
             return self.letter.code
-        return str(self.letter)[:1].upper()
+        return self.letter[:1].upper()
 
     @property
     def text(self) -> str:

@@ -17,8 +17,8 @@ from .state import (
 
 def format_zulu_time(zulu_sec: int) -> str:
     """Format simulator Zulu seconds into 4-digit HHMM string."""
-    hours = (int(zulu_sec) // 3600) % 24
-    minutes = (int(zulu_sec) % 3600) // 60
+    hours = (zulu_sec // 3600) % 24
+    minutes = (zulu_sec % 3600) // 60
     return f"{hours:02d}{minutes:02d}"
 
 
@@ -29,15 +29,15 @@ def format_visibility(visibility: Union[float, int, str]) -> str:
     vis_num = float(visibility)
     if vis_num >= 10000:
         return "10 kilometers"
-    return f"{int(round(vis_num))} meters"
+    return f"{round(vis_num)} meters"
 
 
 def get_runway_heading(rwy: Runway) -> float:
     """Extract magnetic orientation heading (degrees) from runway identifier."""
-    if hasattr(rwy, "heading") and getattr(rwy, "heading") is not None:
+    if rwy.heading is not None:
         return float(rwy.heading)
 
-    digits = "".join(c for c in str(rwy.ident) if c.isdigit())
+    digits = "".join(c for c in rwy.ident if c.isdigit())
     if digits:
         val = int(digits) * 10
         return 360.0 if val == 0 else float(val)
@@ -94,18 +94,18 @@ def generate_atis_text(
     hhmm = format_zulu_time(sec)
 
     if active_runway is not None:
-        runway = str(active_runway).upper().replace("RWY", "").replace("RW", "").strip()
+        runway = active_runway.upper().replace("RWY", "").replace("RW", "").strip()
     else:
         runway = determine_active_runway(airport, weather.wind_deg)
 
     airport_name = airport.name if hasattr(airport, "name") and airport.name else str(airport)
-    wind_deg = int(round(float(weather.wind_deg)))
-    wind_kts = int(round(float(weather.wind_kts)))
+    wind_deg = round(float(weather.wind_deg))
+    wind_kts = round(float(weather.wind_kts))
     vis_str = format_visibility(weather.visibility_m)
-    clouds = str(weather.clouds)
-    temp = int(round(float(weather.temp_c)))
-    dewpoint = int(round(float(weather.dewpoint_c)))
-    qnh = int(round(float(weather.qnh_hpa)))
+    clouds = weather.clouds
+    temp = round(float(weather.temp_c))
+    dewpoint = round(float(weather.dewpoint_c))
+    qnh = round(float(weather.qnh_hpa))
 
     return (
         f"{airport_name} Information {letter_word}, time {hhmm} UTC. "
@@ -142,7 +142,7 @@ def create_initial_atis(
         observation_time=obs_time,
         active_runway=rwy,
         script_text=script,
-        zulu_sec=int(weather.zulu_sec),
+        zulu_sec=weather.zulu_sec,
         qnh_hpa=float(weather.qnh_hpa),
         weather=weather,
         airport=airport,
@@ -192,27 +192,31 @@ def evaluate_weather_update(
     qnh_changed = round(abs(curr_qnh - prev_qnh), 4) >= 1.0
 
     # 3. Time elapsed check (>= 30 min / 1800 s, handling midnight rollover)
-    prev_time = int(current_state.zulu_sec)
-    curr_time = int(weather_update.zulu_sec)
+    prev_time = current_state.zulu_sec
+    curr_time = weather_update.zulu_sec
     elapsed_sec = (curr_time - prev_time) if curr_time >= prev_time else (curr_time + 86400 - prev_time)
     time_advanced = elapsed_sec >= 1800
 
     if runway_changed or qnh_changed or time_advanced:
         next_let = advance_letter(current_state.letter)
-        new_script = generate_atis_text(
-            airport=airport or current_state.airport,
-            letter=next_let,
-            weather=weather_update,
-            zulu_sec=weather_update.zulu_sec,
-            active_runway=new_runway,
-        )
+        target_airport = airport or current_state.airport
+        if target_airport is not None:
+            new_script = generate_atis_text(
+                airport=target_airport,
+                letter=next_let,
+                weather=weather_update,
+                zulu_sec=weather_update.zulu_sec,
+                active_runway=new_runway,
+            )
+        else:
+            new_script = ""
         obs_time = f"{format_zulu_time(weather_update.zulu_sec)} UTC"
         new_state = AtisState(
             letter=next_let,
             observation_time=obs_time,
             active_runway=new_runway,
             script_text=new_script,
-            zulu_sec=int(weather_update.zulu_sec),
+            zulu_sec=weather_update.zulu_sec,
             qnh_hpa=curr_qnh,
             weather=weather_update,
             airport=airport or current_state.airport,

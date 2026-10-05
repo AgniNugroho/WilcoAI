@@ -6,7 +6,7 @@ from typing import Optional, Union, Any
 class RunwayList(list):
     """List of Runway instances that supports lookup and containment by runway identifier string."""
 
-    def __getitem__(self, key: Union[int, slice, str]) -> Any:
+    def __getitem__(self, key: Any) -> Any:
         if isinstance(key, str):
             clean = key.upper().replace("RWY", "").replace("RW", "")
             for r in self:
@@ -26,7 +26,7 @@ class RunwayList(list):
             )
         return super().__contains__(item)
 
-    def get(self, key: Union[int, str], default: Optional[Runway] = None) -> Optional[Runway]:
+    def get(self, key: Any, default: Any = None) -> Any:
         try:
             return self[key]
         except (KeyError, IndexError):
@@ -38,6 +38,7 @@ class Runway:
     ident: str  # e.g. "11", "09", "29", "27"
     name: str = ""  # e.g. "RW11"
     elevation_ft: int = 0
+    heading: Optional[float] = None
     ils_ident: Optional[str] = None
     lat: float = 0.0
     lon: float = 0.0
@@ -91,7 +92,7 @@ class SID:
 class SidList(list):
     """List of SID instances that supports dict-like and string-containment operations."""
 
-    def __getitem__(self, key: Union[int, slice, str]) -> Any:
+    def __getitem__(self, key: Any) -> Any:
         if isinstance(key, str):
             key_upper = key.upper()
             for s in self:
@@ -108,7 +109,7 @@ class SidList(list):
             return any(s.name.upper() == item_upper for s in self)
         return super().__contains__(item)
 
-    def get(self, key: Union[int, str], default: Optional[SID] = None) -> Optional[SID]:
+    def get(self, key: Any, default: Any = None) -> Any:
         try:
             return self[key]
         except (KeyError, IndexError):
@@ -176,7 +177,7 @@ class FacilityDict(dict):
                 return True
         return super().__contains__(key)
 
-    def get(self, key: Any, default: Optional[int] = None) -> Optional[int]:
+    def get(self, key: Any, default: Any = None) -> Any:
         try:
             return self[key]
         except KeyError:
@@ -201,9 +202,19 @@ class AirportInfo:
     icao: str
     name: str
     transition_alt: int
-    runways: list[Runway] = field(default_factory=RunwayList)
-    facilities: dict[str, int] = field(default_factory=FacilityDict)
-    sids: Union[list[SID], SidList] = field(default_factory=SidList)
+    runways: RunwayList = field(default_factory=RunwayList)
+    facilities: Union[FacilityDict, dict[Any, Any]] = field(default_factory=FacilityDict)
+    sids: SidList = field(default_factory=SidList)
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.runways, RunwayList):
+            self.runways = RunwayList(self.runways)
+        if not isinstance(self.facilities, FacilityDict):
+            fd = FacilityDict()
+            fd.update(self.facilities)
+            self.facilities = fd
+        if not isinstance(self.sids, SidList):
+            self.sids = SidList(self.sids)
 
     @property
     def tower_freq(self) -> Optional[int]:

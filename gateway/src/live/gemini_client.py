@@ -52,8 +52,9 @@ class GeminiLiveClient:
             self._client = genai.Client(api_key=self.api_key)
 
         if self._client is not None and types is not None:
+            audio_modality: Any = getattr(types.Modality, "AUDIO", "AUDIO")
             config = types.LiveConnectConfig(
-                response_modalities=["AUDIO"],
+                response_modalities=[audio_modality],
                 system_instruction=types.Content(
                     parts=[types.Part.from_text(text=system_instruction)]
                 )
@@ -70,7 +71,8 @@ class GeminiLiveClient:
             self._session_ctx = self._client.aio.live.connect(
                 model=self.model, config=config
             )
-            self._session = await self._session_ctx.__aenter__()
+            if self._session_ctx is not None:
+                self._session = await self._session_ctx.__aenter__()
 
         self._is_connected = True
 

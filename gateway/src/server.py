@@ -24,21 +24,21 @@ try:
     from navdata import load_airport
     from atis.state import TelemetryWeather, AtisState
     from atis.generator import create_initial_atis, evaluate_weather_update
-except ImportError:
-    from gateway.src.config import Settings, get_settings
-    from gateway.src.live.gemini_client import GeminiLiveClient, MockGeminiLiveClient
-    from gateway.src.atc.state_machine import FlightSession, FlightPhase
-    from gateway.src.atc.prompt_builder import build_system_prompt
-    from gateway.src.navdata.models import AirportInfo, Runway, RunwayList, FacilityDict
-    from gateway.src.navdata.atc_parser import (
+except (ImportError, ValueError):
+    from .config import Settings, get_settings
+    from .live.gemini_client import GeminiLiveClient, MockGeminiLiveClient
+    from .atc.state_machine import FlightSession, FlightPhase
+    from .atc.prompt_builder import build_system_prompt
+    from .navdata.models import AirportInfo, Runway, RunwayList, FacilityDict
+    from .navdata.atc_parser import (
         DEFAULT_AIRPORT_FACILITIES,
         DEFAULT_AIRPORT_NAMES,
         get_facility_by_freq,
         parse_freq_to_hz,
     )
-    from gateway.src.navdata import load_airport
-    from gateway.src.atis.state import TelemetryWeather, AtisState
-    from gateway.src.atis.generator import create_initial_atis, evaluate_weather_update
+    from .navdata import load_airport
+    from .atis.state import TelemetryWeather, AtisState
+    from .atis.generator import create_initial_atis, evaluate_weather_update
 
 logger = logging.getLogger(__name__)
 
@@ -221,9 +221,13 @@ async def websocket_atc(
                             active_radio = str(data["active_radio"]).upper()
 
                         if "com1_hz" in data or "com1" in data:
-                            com1_hz = parse_freq_to_hz(data.get("com1_hz") or data.get("com1"))
+                            raw_c1 = data.get("com1_hz") if data.get("com1_hz") is not None else data.get("com1")
+                            if raw_c1 is not None:
+                                com1_hz = parse_freq_to_hz(raw_c1)
                         if "com2_hz" in data or "com2" in data:
-                            com2_hz = parse_freq_to_hz(data.get("com2_hz") or data.get("com2"))
+                            raw_c2 = data.get("com2_hz") if data.get("com2_hz") is not None else data.get("com2")
+                            if raw_c2 is not None:
+                                com2_hz = parse_freq_to_hz(raw_c2)
 
                         direct_freq = (
                             data.get("frequency")

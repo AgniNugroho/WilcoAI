@@ -4,7 +4,7 @@ from fastapi.testclient import TestClient
 
 from config import Settings, get_settings
 from live.gemini_client import MockGeminiLiveClient
-from server import app, get_gemini_client
+from server import app, get_gemini_client, safe_load_airport
 
 
 @pytest.fixture
@@ -386,4 +386,18 @@ def test_empty_audio_chunk_guard(client, mock_gemini):
 
         # Zero audio chunks forwarded to Gemini
         assert len(mock_gemini.sent_audio_chunks) == 0
+
+
+def test_safe_load_airport_fallback():
+    """Verify safe_load_airport gracefully falls back when data path is invalid and includes heading."""
+    airport = safe_load_airport("non_existent_path", icao="WAHI")
+    assert airport.icao == "WAHI"
+    assert "11" in airport.runways
+    rw11 = airport.runways["11"]
+    assert rw11.heading == 110.0
+    assert rw11.elevation_ft == 24
+    rw29 = airport.runways["29"]
+    assert rw29.heading == 290.0
+    assert rw29.elevation_ft == 24
+
 
