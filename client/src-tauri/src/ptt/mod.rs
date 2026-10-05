@@ -370,7 +370,8 @@ impl PttManager {
     }
 
     /// Handles mouse button press event (e.g. 4 = Mouse 4/Thumb Back, 5 = Mouse 5/Thumb Forward, 3 = Middle)
-    pub fn handle_mouse_press(&self, button: u8) {
+    /// Returns true if the event was consumed (learning mode or matched binding), false otherwise.
+    pub fn handle_mouse_press(&self, button: u8) -> bool {
         // If learning mode is active, atomically check-and-consume the learn target
         if let Some(target) = self.learn_target.write().unwrap().take() {
             let mut cfg = self.config.write().unwrap();
@@ -378,7 +379,7 @@ impl PttManager {
                 RadioType::Com1 => cfg.com1.mouse_button = Some(button),
                 RadioType::Com2 => cfg.com2.mouse_button = Some(button),
             }
-            return;
+            return true;
         }
 
         // Otherwise check registered bindings
@@ -386,25 +387,34 @@ impl PttManager {
         if cfg.com1.matches_mouse(button) {
             drop(cfg);
             self.trigger_press(RadioType::Com1);
+            true
         } else if cfg.com2.matches_mouse(button) {
             drop(cfg);
             self.trigger_press(RadioType::Com2);
+            true
+        } else {
+            false
         }
     }
 
     /// Handles mouse button release event
-    pub fn handle_mouse_release(&self, button: u8) {
+    /// Returns true if the event matched a binding, false otherwise.
+    pub fn handle_mouse_release(&self, button: u8) -> bool {
         if self.is_learning().is_some() {
-            return;
+            return false;
         }
 
         let cfg = self.config.read().unwrap();
         if cfg.com1.matches_mouse(button) {
             drop(cfg);
             self.trigger_release(RadioType::Com1);
+            true
         } else if cfg.com2.matches_mouse(button) {
             drop(cfg);
             self.trigger_release(RadioType::Com2);
+            true
+        } else {
+            false
         }
     }
 }

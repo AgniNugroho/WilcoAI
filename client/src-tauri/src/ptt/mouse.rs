@@ -1,4 +1,6 @@
 use std::sync::atomic::{AtomicBool, Ordering};
+#[cfg(windows)]
+use std::sync::atomic::AtomicU32;
 use std::sync::Arc;
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
@@ -13,6 +15,8 @@ static MOUSE_MANAGER: Mutex<Option<PttManager>> = Mutex::new(None);
 
 #[cfg(windows)]
 const WH_MOUSE_LL: i32 = 14;
+#[cfg(windows)]
+const WM_QUIT: u32 = 0x0012;
 #[cfg(windows)]
 const WM_MBUTTONDOWN: u32 = 0x0207;
 #[cfg(windows)]
@@ -53,6 +57,7 @@ struct WinMsg {
 
 #[cfg(windows)]
 extern "system" {
+    fn GetCurrentThreadId() -> u32;
     fn SetWindowsHookExW(
         id_hook: i32,
         lpfn: Option<unsafe extern "system" fn(i32, usize, isize) -> isize>,
@@ -61,13 +66,8 @@ extern "system" {
     ) -> isize;
     fn UnhookWindowsHookEx(hhk: isize) -> i32;
     fn CallNextHookEx(hhk: isize, n_code: i32, wparam: usize, lparam: isize) -> isize;
-    fn PeekMessageW(
-        msg: *mut WinMsg,
-        hwnd: isize,
-        filter_min: u32,
-        filter_max: u32,
-        remove_msg: u32,
-    ) -> i32;
+    fn GetMessageW(msg: *mut WinMsg, hwnd: isize, filter_min: u32, filter_max: u32) -> i32;
+    fn PostThreadMessageW(id_thread: u32, msg: u32, wparam: usize, lparam: isize) -> i32;
     fn TranslateMessage(msg: *const WinMsg) -> i32;
     fn DispatchMessageW(msg: *const WinMsg) -> isize;
 }
@@ -95,14 +95,20 @@ unsafe extern "system" fn mouse_hook_proc(n_code: i32, wparam: usize, lparam: is
 
         if let Some(btn) = button {
             let is_down = msg == WM_XBUTTONDOWN || msg == WM_MBUTTONDOWN;
+            let mut handled = false;
             if let Ok(guard) = MOUSE_MANAGER.lock() {
                 if let Some(ref mgr) = *guard {
-                    if is_down {
-                        mgr.handle_mouse_press(btn);
+                    handled = if is_down {
+                        mgr.handle_mouse_press(btn)
                     } else {
-                        mgr.handle_mouse_release(btn);
-                    }
+                        mgr.handle_mouse_release(btn)
+                    };
                 }
+            }
+            // If this event was consumed by PTT (active binding or learning mode), swallow it
+            // to avoid unwanted side effects (e.g. browser back/forward navigation)
+            if handled {
+                return 1;
             }
         }
     }
@@ -113,6 +119,8 @@ unsafe extern "system" fn mouse_hook_proc(n_code: i32, wparam: usize, lparam: is
 /// Background global listener that monitors mouse thumb buttons (Mouse 4/5) and middle click (Mouse 3)
 pub struct MouseListener {
     running: Arc<AtomicBool>,
+    #[cfg(windows)]
+    win_thread_id: Arc<AtomicU32>,
     manager: PttManager,
     thread_handle: Option<JoinHandle<()>>,
 }
@@ -122,6 +130,8 @@ impl MouseListener {
     pub fn new(manager: PttManager) -> Self {
         Self {
             running: Arc::new(AtomicBool::new(false)),
+            #[cfg(windows)]
+            win_thread_id: Arc::new(AtomicU32::new(0)),
             manager,
             thread_handle: None,
         }
@@ -140,6 +150,8 @@ impl MouseListener {
 
         self.running.store(true, Ordering::SeqCst);
         let running = Arc::clone(&self.running);
+        #[cfg(windows)]
+        let win_thread_id = Arc::clone(&self.win_thread_id);
         let manager = self.manager.clone();
 
         #[cfg(windows)]
@@ -152,27 +164,41 @@ impl MouseListener {
         let handle = thread::spawn(move || {
             #[cfg(windows)]
             {
-                let hook = unsafe { SetWindowsHookExW(WH_MOUSE_LL, Some(mouse_hook_proc), 0, 0) };
-                if hook == 0 {
-                    eprintln!("Warning: Failed to install Windows WH_MOUSE_LL low-level mouse hook");
+                let tid = unsafe { GetCurrentThreadId() };
+                win_thread_id.store(tid, Ordering::SeqCst);
+                if !running.load(Ordering::Relaxed) {
+                    win_thread_id.store(0, Ordering::SeqCst);
                     running.store(false, Ordering::SeqCst);
                     return;
                 }
 
+                let hook = unsafe { SetWindowsHookExW(WH_MOUSE_LL, Some(mouse_hook_proc), 0, 0) };
+                if hook == 0 {
+                    eprintln!("Warning: Failed to install Windows WH_MOUSE_LL low-level mouse hook");
+                    win_thread_id.store(0, Ordering::SeqCst);
+                    running.store(false, Ordering::SeqCst);
+                    return;
+                }
+
+                // Standard blocking Windows message pump: zero CPU usage while idle,
+                // zero cursor stutter/delay, woken up immediately on WM_QUIT or mouse events.
+                let mut msg = unsafe { std::mem::zeroed::<WinMsg>() };
                 while running.load(Ordering::Relaxed) {
-                    unsafe {
-                        let mut msg = std::mem::zeroed::<WinMsg>();
-                        while PeekMessageW(&mut msg, 0, 0, 0, 1) != 0 {
-                            TranslateMessage(&msg);
-                            DispatchMessageW(&msg);
-                        }
+                    let ret = unsafe { GetMessageW(&mut msg, 0, 0, 0) };
+                    if ret <= 0 {
+                        // 0 indicates WM_QUIT; -1 indicates error
+                        break;
                     }
-                    thread::sleep(Duration::from_millis(10));
+                    unsafe {
+                        TranslateMessage(&msg);
+                        DispatchMessageW(&msg);
+                    }
                 }
 
                 unsafe {
                     UnhookWindowsHookEx(hook);
                 }
+                win_thread_id.store(0, Ordering::SeqCst);
             }
 
             #[cfg(not(windows))]
@@ -182,6 +208,8 @@ impl MouseListener {
                     thread::sleep(Duration::from_millis(50));
                 }
             }
+
+            running.store(false, Ordering::SeqCst);
         });
 
         self.thread_handle = Some(handle);
@@ -194,6 +222,22 @@ impl MouseListener {
             {
                 if let Ok(mut guard) = MOUSE_MANAGER.lock() {
                     *guard = None;
+                }
+                // Signal hook thread to break out of GetMessageW immediately
+                let mut tid = self.win_thread_id.swap(0, Ordering::SeqCst);
+                if tid == 0 {
+                    for _ in 0..50 {
+                        tid = self.win_thread_id.swap(0, Ordering::SeqCst);
+                        if tid != 0 {
+                            break;
+                        }
+                        thread::sleep(Duration::from_millis(1));
+                    }
+                }
+                if tid != 0 {
+                    unsafe {
+                        PostThreadMessageW(tid, WM_QUIT, 0, 0);
+                    }
                 }
             }
 
@@ -209,3 +253,4 @@ impl Drop for MouseListener {
         self.stop();
     }
 }
+

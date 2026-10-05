@@ -347,4 +347,37 @@ fn test_mouse_listener_instantiation_mock() {
     mouse.stop();
 }
 
+#[test]
+fn test_mouse_press_handled_return_values() {
+    let mut config = PttConfig::default();
+    config.com1 = PttBinding::from_mouse(4);
+    let manager = PttManager::with_config(config);
+
+    // Unmapped button returns false
+    assert!(!manager.handle_mouse_press(5));
+    assert!(!manager.handle_mouse_release(5));
+
+    // Mapped button returns true
+    assert!(manager.handle_mouse_press(4));
+    assert!(manager.handle_mouse_release(4));
+
+    // Learning mode consumes and returns true
+    manager.start_learn_mode(RadioType::Com2);
+    assert!(manager.handle_mouse_press(5));
+    assert_eq!(manager.get_binding(RadioType::Com2).mouse_button, Some(5));
+}
+
+#[test]
+fn test_mouse_listener_lifecycle() {
+    let manager = PttManager::new();
+    let mut mouse = MouseListener::new(manager);
+    assert!(!mouse.is_running());
+
+    mouse.start();
+    assert!(mouse.is_running());
+
+    mouse.stop();
+    assert!(!mouse.is_running());
+}
+
 
